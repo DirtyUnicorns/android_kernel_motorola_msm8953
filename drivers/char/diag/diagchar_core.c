@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -426,8 +426,10 @@ static void diag_close_logging_process(const int pid)
 	driver->mask_clear = 1;
 	mutex_unlock(&driver->diag_maskclear_mutex);
 
+	mutex_lock(&driver->diagchar_mutex);
 	session_peripheral_mask = session_info->peripheral_mask;
 	diag_md_session_close(session_info);
+	mutex_unlock(&driver->diagchar_mutex);
 	for (i = 0; i < NUM_MD_SESSIONS; i++)
 		if (MD_PERIPHERAL_MASK(i) & session_peripheral_mask)
 			diag_mux_close_peripheral(DIAG_LOCAL_PROC, i);
@@ -957,11 +959,6 @@ static int diag_send_raw_data_remote(int proc, void *buf, int len,
 		hdlc_disabled = driver->hdlc_disabled;
 	if (hdlc_disabled) {
 		payload = *(uint16_t *)(buf + 2);
-		if (payload > DIAG_MAX_HDLC_BUF_SIZE) {
-			pr_err("diag: Dropping packet, payload size is %d\n",
-				payload);
-			return -EBADMSG;
-		}
 		driver->hdlc_encode_buf_len = payload;
 		/*
 		 * Adding 4 bytes for start (1 byte), version (1 byte) and
@@ -3370,7 +3367,7 @@ static int diagchar_cleanup(void)
 static int __init diagchar_init(void)
 {
 	dev_t dev;
-	int error, ret;
+	int error, ret, i;
 
 	pr_debug("diagfwd initializing ..\n");
 	ret = 0;
@@ -3416,7 +3413,9 @@ static int __init diagchar_init(void)
 	mutex_init(&driver->diag_file_mutex);
 	mutex_init(&driver->delayed_rsp_mutex);
 	mutex_init(&apps_data_mutex);
-	mutex_init(&driver->diagfwd_channel_mutex);
+	mutex_init(&driver->msg_mask_lock);
+	for (i = 0; i < NUM_PERIPHERALS; i++)
+		mutex_init(&driver->diagfwd_channel_mutex[i]);
 	init_waitqueue_head(&driver->wait_q);
 	INIT_WORK(&(driver->diag_drain_work), diag_drain_work_fn);
 	INIT_WORK(&(driver->update_user_clients),
