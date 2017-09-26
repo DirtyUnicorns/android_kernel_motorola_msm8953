@@ -2211,7 +2211,7 @@ struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 			ret = of_property_read_string(dev->of_node,
 				"qcom,dba_cpu_dai_name", &dba_cpu_dai_name);
 			if (ret == 0)
-				msm8952_albus_hdmi_dba_dai_link[0].cpu_dai_name =
+				msm8952_hdmi_dba_dai_link[0].cpu_dai_name =
 					dba_cpu_dai_name;
 			memcpy(msm8952_dai_links + len5, msm8952_hdmi_dba_dai_link,
 				sizeof(msm8952_hdmi_dba_dai_link));
