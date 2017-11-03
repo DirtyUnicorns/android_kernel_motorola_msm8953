@@ -682,8 +682,7 @@ void msm_gem_free_object(struct drm_gem_object *obj)
 
 		drm_prime_gem_destroy(obj, msm_obj->import_sgt);
 	} else {
-		if (msm_obj->vaddr)
-			vunmap(msm_obj->vaddr);
+		vunmap(msm_obj->vaddr);
 		put_pages(obj);
 	}
 

@@ -90,6 +90,7 @@ struct drm_msm_gem_new {
 struct drm_msm_gem_info {
 	__u32 handle;         /* in */
 	__u32 hint;           /* in, 0: mmap offset; 1: GPU iova */
+	__u32 pad;
 	__u64 offset;         /* out, offset to pass to mmap() */
 };
 

@@ -297,7 +297,6 @@ struct msm_drm_private {
 	struct drm_property *plane_property[PLANE_PROP_COUNT];
 	struct drm_property *crtc_property[CRTC_PROP_COUNT];
 	struct drm_property *conn_property[CONNECTOR_PROP_COUNT];
-
 	/* VRAM carveout, used when no IOMMU: */
 	struct {
 		unsigned long size;
@@ -347,6 +346,8 @@ void __msm_fence_worker(struct work_struct *work);
 		(_cb)->func = _func;                         \
 	} while (0)
 
+int msm_atomic_check(struct drm_device *dev,
+		     struct drm_atomic_state *state);
 int msm_atomic_commit(struct drm_device *dev,
 		struct drm_atomic_state *state, bool async);
 
