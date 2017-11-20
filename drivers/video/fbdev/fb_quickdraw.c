@@ -120,7 +120,7 @@ static void delete_buffer(struct kobject *kobj)
 	pr_debug("%s-: (buffer: %p)\n", __func__, buffer);
 }
 
-struct fb_quickdraw_buffer *alloc_buffer(struct fb_quickdraw_buffer_data *data)
+struct fb_quickdraw_buffer *quickdraw_alloc_buffer(struct fb_quickdraw_buffer_data *data)
 {
 	struct fb_quickdraw_buffer *buffer = NULL;
 
@@ -586,9 +586,9 @@ static int fb_quickdraw_add_buffer(struct fb_quickdraw_buffer_data *data)
 		}
 	}
 
-	buffer = alloc_buffer(data);
+	buffer = quickdraw_alloc_buffer(data);
 	if (!buffer) {
-		pr_err("%s: alloc_buffer failed!\n",
+		pr_err("%s: quickdraw_alloc_buffer failed!\n",
 			__func__);
 		ret = -ENOMEM;
 		goto exit_mutex;
