@@ -134,7 +134,6 @@ static void dctcp_ce_state_0_to_1(struct sock *sk)
 	if (!ca->ce_state &&
 	    inet_csk(sk)->icsk_ack.pending & ICSK_ACK_TIMER)
 		__tcp_send_ack(sk, ca->prior_rcv_nxt);
-
 	ca->prior_rcv_nxt = tp->rcv_nxt;
 	ca->ce_state = 1;
 
