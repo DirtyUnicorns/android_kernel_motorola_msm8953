@@ -3079,8 +3079,11 @@ static int ep_queue(struct usb_ep *ep, struct usb_request *req,
 
 	trace("%pK, %pK, %X", ep, req, gfp_flags);
 
+	if (ep == NULL)
+		return -EINVAL;
+
 	spin_lock_irqsave(mEp->lock, flags);
-	if (ep == NULL || req == NULL || mEp->desc == NULL) {
+	if (req == NULL || mEp->desc == NULL) {
 		retval = -EINVAL;
 		goto done;
 	}
@@ -3166,6 +3169,7 @@ static int ep_queue(struct usb_ep *ep, struct usb_request *req,
 					__func__);
 			dev_dbg(mEp->device, "%s: Remote wakeup is not supported. ept #%d\n",
 					__func__, mEp->num);
+			mEp->multi_req = false;
 
 			retval = -EAGAIN;
 			goto done;
@@ -3218,12 +3222,16 @@ static int ep_dequeue(struct usb_ep *ep, struct usb_request *req)
 				__func__);
 		return -EAGAIN;
 	}
+
+	if (ep == NULL)
+		return -EINVAL;
+
 	spin_lock_irqsave(mEp->lock, flags);
 	/*
 	 * Only ep0 IN is exposed to composite.  When a req is dequeued
 	 * on ep0, check both ep0 IN and ep0 OUT queues.
 	 */
-	if (ep == NULL || req == NULL || mReq->req.status != -EALREADY ||
+	if (req == NULL || mReq->req.status != -EALREADY ||
 		mEp->desc == NULL || list_empty(&mReq->queue) ||
 		(list_empty(&mEp->qh.queue) && ((mEp->type !=
 			USB_ENDPOINT_XFER_CONTROL) ||
@@ -3250,6 +3258,19 @@ static int ep_dequeue(struct usb_ep *ep, struct usb_request *req)
 		mReq->map     = 0;
 	}
 	req->status = -ECONNRESET;
+
+	if (mEp->last_zptr) {
+		dma_pool_free(mEp->td_pool, mEp->last_zptr, mEp->last_zdma);
+		mEp->last_zptr = NULL;
+		mEp->last_zdma = 0;
+	}
+
+	if (mReq->zptr) {
+		dma_pool_free(mEp->td_pool, mReq->zptr, mReq->zdma);
+		mReq->zptr = NULL;
+		mReq->zdma = 0;
+	}
+
 	if (mEp->multi_req) {
 		restore_original_req(mReq);
 		mEp->multi_req = false;
@@ -3427,21 +3448,28 @@ static int ci13xxx_vbus_session(struct usb_gadget *_gadget, int is_active)
 		gadget_ready = 1;
 	spin_unlock_irqrestore(udc->lock, flags);
 
-	if (gadget_ready) {
-		if (is_active) {
-			hw_device_reset(udc);
-			if (udc->udc_driver->notify_event)
-				udc->udc_driver->notify_event(udc,
-					CI13XXX_CONTROLLER_CONNECT_EVENT);
-			if (udc->softconnect)
-				hw_device_state(udc->ep0out.qh.dma);
-		} else {
-			hw_device_state(0);
-			_gadget_stop_activity(&udc->gadget);
-			if (udc->udc_driver->notify_event)
-				udc->udc_driver->notify_event(udc,
-					CI13XXX_CONTROLLER_DISCONNECT_EVENT);
+	if (!gadget_ready)
+		return 0;
+
+	if (is_active) {
+		hw_device_reset(udc);
+		if (udc->udc_driver->notify_event)
+			udc->udc_driver->notify_event(udc,
+				CI13XXX_CONTROLLER_CONNECT_EVENT);
+		/* Enable BAM (if needed) before starting controller */
+		if (udc->softconnect) {
+			dbg_event(0xFF, "BAM EN2",
+				_gadget->bam2bam_func_enabled);
+			msm_usb_bam_enable(CI_CTRL,
+				_gadget->bam2bam_func_enabled);
+			hw_device_state(udc->ep0out.qh.dma);
 		}
+	} else {
+		hw_device_state(0);
+		_gadget_stop_activity(&udc->gadget);
+		if (udc->udc_driver->notify_event)
+			udc->udc_driver->notify_event(udc,
+				CI13XXX_CONTROLLER_DISCONNECT_EVENT);
 	}
 
 	return 0;
@@ -3487,6 +3515,12 @@ static int ci13xxx_pullup(struct usb_gadget *_gadget, int is_active)
 	spin_unlock_irqrestore(udc->lock, flags);
 
 	pm_runtime_get_sync(&_gadget->dev);
+
+	/* Enable BAM (if needed) before starting controller */
+	if (is_active) {
+		dbg_event(0xFF, "BAM EN1", _gadget->bam2bam_func_enabled);
+		msm_usb_bam_enable(CI_CTRL, _gadget->bam2bam_func_enabled);
+	}
 
 	spin_lock_irqsave(udc->lock, flags);
 	if (!udc->vbus_active) {

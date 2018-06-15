@@ -1161,7 +1161,7 @@ int msm_isp_request_axi_stream(struct vfe_device *vfe_dev, void *arg)
 		return -EINVAL;
 	}
 
-	stream_info->memory_input = stream_cfg_cmd->memory_input;
+	stream_info->rdi_input_type = stream_cfg_cmd->rdi_input_type;
 	vfe_dev->reg_update_requested &=
 		~(BIT(SRC_TO_INTF(stream_info->stream_src)));
 
@@ -1677,7 +1677,7 @@ static int msm_isp_cfg_ping_pong_address(struct vfe_device *vfe_dev,
 	dma_addr_t paddr;
 	struct dual_vfe_resource *dual_vfe_res = NULL;
 	uint32_t vfe_id = 0;
-	unsigned long flags;
+	unsigned long flags = 0;
 
 	if (stream_idx >= VFE_AXI_SRC_MAX) {
 		pr_err("%s: Invalid stream_idx", __func__);
@@ -3274,7 +3274,7 @@ static void msm_isp_remove_buf_queue(struct vfe_device *vfe_dev,
 int msm_isp_update_axi_stream(struct vfe_device *vfe_dev, void *arg)
 {
 	int rc = 0, i, j;
-	struct msm_vfe_axi_stream *stream_info;
+	struct msm_vfe_axi_stream *stream_info = NULL;
 	struct msm_vfe_axi_shared_data *axi_data = &vfe_dev->axi_data;
 	struct msm_vfe_axi_stream_update_cmd *update_cmd = arg;
 	struct msm_vfe_axi_stream_cfg_update_info *update_info = NULL;

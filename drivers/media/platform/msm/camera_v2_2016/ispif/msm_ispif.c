@@ -73,7 +73,7 @@ static void msm_ispif_io_dump_reg(struct ispif_device *ispif)
 
 
 static inline int msm_ispif_is_intf_valid(uint32_t csid_version,
-	enum msm_ispif_vfe_intf intf_type)
+	uint8_t intf_type)
 {
 	return ((csid_version <= CSID_VERSION_V22 && intf_type != VFE0) ||
 		(intf_type >= VFE_MAX)) ? false : true;
@@ -599,7 +599,7 @@ static int msm_ispif_reset(struct ispif_device *ispif)
 			ispif->base + ISPIF_VFE_m_INTF_CMD_0(i));
 		msm_camera_io_w(ISPIF_STOP_INTF_IMMEDIATELY,
 			ispif->base + ISPIF_VFE_m_INTF_CMD_1(i));
-		pr_debug("%s: base %lx", __func__, (unsigned long)ispif->base);
+		pr_debug("%s: base %pK", __func__, ispif->base);
 		msm_camera_io_w(0, ispif->base +
 			ISPIF_VFE_m_PIX_INTF_n_CID_MASK(i, 0));
 		msm_camera_io_w(0, ispif->base +

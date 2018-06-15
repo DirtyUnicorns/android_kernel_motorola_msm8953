@@ -2,7 +2,7 @@ VERSION = 3
 PATCHLEVEL = 18
 SUBLEVEL = 112
 EXTRAVERSION =
-NAME = Shuffling Zombie Juror
+NAME = Diseased Newt
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
@@ -141,14 +141,9 @@ PHONY += $(MAKECMDGOALS) sub-make
 $(filter-out _all sub-make $(CURDIR)/Makefile, $(MAKECMDGOALS)) _all: sub-make
 	@:
 
-# KBUILD_RELSRC is the relative path from output to source; this was added so
-# that the absolute path to source files wouldn't get encoded in vmlinux and
-# module binaries
-SUB_KBUILD_SRC = $(if $(KBUILD_RELSRC),$(KBUILD_RELSRC),$(CURDIR))
-
-sub-make: FORCE
-	$(Q)$(MAKE) -C $(KBUILD_OUTPUT) KBUILD_SRC=$(SUB_KBUILD_SRC) \
-	-f $(SUB_KBUILD_SRC)/Makefile $(filter-out _all sub-make,$(MAKECMDGOALS))
+sub-make:
+	$(Q)$(MAKE) -C $(KBUILD_OUTPUT) KBUILD_SRC=$(CURDIR) \
+	-f $(CURDIR)/Makefile $(filter-out _all sub-make,$(MAKECMDGOALS))
 
 # Leave processing to above invocation of make
 skip-makefile := 1
@@ -382,6 +377,7 @@ LDFLAGS_MODULE  =
 CFLAGS_KERNEL	=
 AFLAGS_KERNEL	=
 CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage -fno-tree-loop-im
+CFLAGS_KCOV	= -fsanitize-coverage=trace-pc
 
 
 ifeq ($(cc-name),clang)
@@ -442,7 +438,7 @@ export MAKE AWK GENKSYMS INSTALLKERNEL PERL PYTHON UTS_MACHINE
 export HOSTCXX HOSTCXXFLAGS LDFLAGS_MODULE CHECK CHECKFLAGS
 
 export KBUILD_CPPFLAGS NOSTDINC_FLAGS LINUXINCLUDE OBJCOPYFLAGS LDFLAGS
-export KBUILD_CFLAGS CFLAGS_KERNEL CFLAGS_MODULE CFLAGS_GCOV CFLAGS_KASAN
+export KBUILD_CFLAGS CFLAGS_KERNEL CFLAGS_MODULE CFLAGS_GCOV CFLAGS_KCOV CFLAGS_KASAN CFLAGS_UBSAN
 export KBUILD_AFLAGS AFLAGS_KERNEL AFLAGS_MODULE
 export KBUILD_AFLAGS_MODULE KBUILD_CFLAGS_MODULE KBUILD_LDFLAGS_MODULE
 export KBUILD_AFLAGS_KERNEL KBUILD_CFLAGS_KERNEL
@@ -631,7 +627,6 @@ include $(srctree)/arch/$(SRCARCH)/Makefile
 
 KBUILD_CFLAGS	+= $(call cc-option,-fno-delete-null-pointer-checks,)
 KBUILD_CFLAGS	+= $(call cc-disable-warning,frame-address,)
-KBUILD_CFLAGS	+= $(call cc-disable-warning,maybe-uninitialized,)
 KBUILD_CFLAGS	+= $(call cc-disable-warning, format-truncation)
 KBUILD_CFLAGS	+= $(call cc-disable-warning, format-overflow)
 KBUILD_CFLAGS	+= $(call cc-disable-warning, int-in-bool-context)
@@ -640,6 +635,7 @@ KBUILD_AFLAGS	+= $(call cc-option,-fno-PIE)
 
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
 KBUILD_CFLAGS	+= $(call cc-option,-Oz,-Os)
+KBUILD_CFLAGS	+= $(call cc-disable-warning,maybe-uninitialized,)
 else
 KBUILD_CFLAGS	+= -O2
 endif
@@ -649,6 +645,9 @@ KBUILD_CFLAGS   += $(call cc-option,-fno-store-merging,)
 
 # Tell gcc to never replace conditional load with a non-conditional one
 KBUILD_CFLAGS	+= $(call cc-option,--param=allow-store-data-races=0)
+
+# Needed to unbreak GCC 7.x and above
+KBUILD_CFLAGS   += $(call cc-option,-fno-store-merging,)
 
 ifdef CONFIG_READABLE_ASM
 # Disable optimizations that make assembler listings hard to read.
@@ -700,6 +699,14 @@ else
 endif
 endif
 KBUILD_CFLAGS += $(stackp-flag)
+
+ifdef CONFIG_KCOV
+  ifeq ($(call cc-option, $(CFLAGS_KCOV)),)
+    $(warning Cannot use CONFIG_KCOV: \
+             -fsanitize-coverage=trace-pc is not supported by compiler)
+    CFLAGS_KCOV =
+  endif
+endif
 
 ifeq ($(cc-name),clang)
 KBUILD_CPPFLAGS += $(call cc-option,-Qunused-arguments,)
@@ -1023,7 +1030,7 @@ prepare1: prepare2 $(version_h) include/generated/utsrelease.h \
 
 archprepare: archheaders archscripts prepare1 scripts_basic
 
-prepare0: archprepare FORCE
+prepare0: archprepare
 	$(Q)$(MAKE) $(build)=.
 
 # All the preparing..
@@ -1041,8 +1048,7 @@ define filechk_utsrelease.h
 	  echo '"$(KERNELRELEASE)" exceeds $(uts_len) characters' >&2;    \
 	  exit 1;                                                         \
 	fi;                                                               \
-	(echo \#define UTS_RELEASE \"$(KERNELRELEASE)\";                  \
-	echo \#define SHORT_UTS_RELEASE \"$(KERNELVERSION)$(CONFIG_LOCALVERSION)\";)
+	(echo \#define UTS_RELEASE \"$(KERNELRELEASE)\";)
 endef
 
 define filechk_version.h
@@ -1074,7 +1080,7 @@ INSTALL_FW_PATH=$(INSTALL_MOD_PATH)/lib/firmware
 export INSTALL_FW_PATH
 
 PHONY += firmware_install
-firmware_install: FORCE
+firmware_install:
 	@mkdir -p $(objtree)/firmware
 	$(Q)$(MAKE) -f $(srctree)/scripts/Makefile.fwinst obj=firmware __fw_install
 
@@ -1096,7 +1102,7 @@ PHONY += archscripts
 archscripts:
 
 PHONY += __headers
-__headers: $(version_h) scripts_basic asm-generic archheaders archscripts FORCE
+__headers: $(version_h) scripts_basic asm-generic archheaders archscripts
 	$(Q)$(MAKE) $(build)=scripts build_unifdef
 
 PHONY += headers_install_all

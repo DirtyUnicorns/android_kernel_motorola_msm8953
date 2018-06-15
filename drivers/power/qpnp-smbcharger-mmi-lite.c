@@ -6068,8 +6068,6 @@ static int smbchg_hw_init(struct smbchg_chip *chip)
 		}
 	}
 
-	/* Set the initial target fastchg current to 500mA for unknown state */
-	chip->target_fastchg_current_ma = 500;
 	rc = smbchg_set_fastchg_current(chip, chip->target_fastchg_current_ma);
 	if (rc < 0) {
 		dev_err(chip->dev, "Couldn't set fastchg current = %d\n", rc);
@@ -7162,6 +7160,26 @@ static int smbchg_check_chg_version(struct smbchg_chip *chip)
 }
 
 #define CHG_SHOW_MAX_SIZE 50
+static ssize_t factory_charge_upper_show(struct device *dev,
+				    struct device_attribute *attr,
+				    char *buf)
+{
+	int state;
+
+	if (!the_chip) {
+		pr_err("chip not valid\n");
+		return -ENODEV;
+	}
+
+	state = the_chip->upper_limit_capacity;
+
+	return scnprintf(buf, CHG_SHOW_MAX_SIZE, "%d\n", state);
+}
+
+static DEVICE_ATTR(factory_charge_upper, 0444,
+		factory_charge_upper_show,
+		NULL);
+
 static ssize_t force_demo_mode_store(struct device *dev,
 				struct device_attribute *attr,
 				const char *buf, size_t count)
@@ -7627,7 +7645,7 @@ static ssize_t force_chg_iusb_show(struct device *dev,
 					struct device_attribute *attr,
 					char *buf)
 {
-	int state = 0;
+	int state;
 	int ret;
 	u8 value;
 
@@ -7839,7 +7857,7 @@ static bool smbchg_is_max_thermal_level(struct smbchg_chip *chip)
 static char *smb_health_text[] = {
 	"Unknown", "Good", "Overheat", "Dead", "Over voltage",
 	"Unspecified failure", "Cold", "Watchdog timer expire",
-	"Safety timer expire", "Warm", "Cool",  "Slightly Cool"
+	"Safety timer expire",  "Warm", "Cool", "Hot", "Slightly Cool"
 };
 
 static int smbchg_check_temp_range(struct smbchg_chip *chip,
@@ -7878,7 +7896,7 @@ static int smbchg_check_temp_range(struct smbchg_chip *chip,
 static void smbchg_check_temp_state(struct smbchg_chip *chip, int batt_temp)
 {
 	int hotspot;
-	int next_state = chip->temp_state;
+	int temp_state = POWER_SUPPLY_HEALTH_GOOD;
 	int max_temp = 0;
 
 	if (!chip)
@@ -7902,45 +7920,71 @@ static void smbchg_check_temp_state(struct smbchg_chip *chip, int batt_temp)
 		batt_temp = hotspot;
 	}
 
-	if (batt_temp >= max_temp)
-		next_state = POWER_SUPPLY_HEALTH_OVERHEAT;
-	else if (batt_temp >= chip->warm_temp_c)
-		next_state = POWER_SUPPLY_HEALTH_WARM;
-	else if (batt_temp > chip->slightly_cool_temp_c)
-		next_state = POWER_SUPPLY_HEALTH_GOOD;
-	else if (batt_temp > chip->cool_temp_c)
-		next_state = POWER_SUPPLY_HEALTH_SLIGHTLY_COOL;
-	else if (batt_temp > chip->cold_temp_c)
-		next_state = POWER_SUPPLY_HEALTH_COOL;
-	else
-		next_state = POWER_SUPPLY_HEALTH_COLD;
-
-	if (next_state == POWER_SUPPLY_HEALTH_WARM) {
-		if (chip->temp_state == POWER_SUPPLY_HEALTH_OVERHEAT &&
-		    batt_temp > max_temp - HYSTERISIS_DEGC)
-			next_state = POWER_SUPPLY_HEALTH_OVERHEAT;
-	} else if (next_state == POWER_SUPPLY_HEALTH_GOOD) {
-		if (chip->temp_state == POWER_SUPPLY_HEALTH_WARM &&
-		    batt_temp > chip->warm_temp_c - HYSTERISIS_DEGC)
-			next_state = POWER_SUPPLY_HEALTH_WARM;
-		if (chip->temp_state == POWER_SUPPLY_HEALTH_SLIGHTLY_COOL &&
-		    batt_temp < chip->slightly_cool_temp_c + HYSTERISIS_DEGC)
-			next_state = POWER_SUPPLY_HEALTH_SLIGHTLY_COOL;
-	} else if (next_state == POWER_SUPPLY_HEALTH_SLIGHTLY_COOL) {
-		if (chip->temp_state == POWER_SUPPLY_HEALTH_COOL &&
-		    batt_temp < chip->cool_temp_c + HYSTERISIS_DEGC)
-			next_state = POWER_SUPPLY_HEALTH_COOL;
-	} else if (next_state == POWER_SUPPLY_HEALTH_COOL) {
-		if (chip->temp_state == POWER_SUPPLY_HEALTH_COLD &&
-		    batt_temp < chip->cold_temp_c + HYSTERISIS_DEGC)
-			next_state = POWER_SUPPLY_HEALTH_COLD;
+	if (chip->temp_state == POWER_SUPPLY_HEALTH_WARM) {
+		if (batt_temp >= max_temp)
+			/* Warm to Hot */
+			temp_state = POWER_SUPPLY_HEALTH_OVERHEAT;
+		else if (batt_temp <=
+			 chip->warm_temp_c - HYSTERISIS_DEGC)
+			/* Warm to Normal */
+			temp_state = POWER_SUPPLY_HEALTH_GOOD;
+		else
+			/* Stay Warm */
+			temp_state = POWER_SUPPLY_HEALTH_WARM;
+	} else if ((chip->temp_state == POWER_SUPPLY_HEALTH_GOOD) ||
+		   (chip->temp_state == POWER_SUPPLY_HEALTH_UNKNOWN)) {
+		if (batt_temp >= chip->warm_temp_c)
+			/* Normal to Warm */
+			temp_state = POWER_SUPPLY_HEALTH_WARM;
+		else if (batt_temp <= chip->slightly_cool_temp_c)
+			/* Normal to slightly Cool */
+			temp_state = POWER_SUPPLY_HEALTH_SLIGHTLY_COOL;
+		else
+			/* Stay Normal */
+			temp_state = POWER_SUPPLY_HEALTH_GOOD;
+	} else if (chip->temp_state == POWER_SUPPLY_HEALTH_SLIGHTLY_COOL) {
+		if (batt_temp >=
+		    chip->slightly_cool_temp_c + HYSTERISIS_DEGC)
+			/* Slightly Cool to Normal */
+			temp_state = POWER_SUPPLY_HEALTH_GOOD;
+		else if (batt_temp <= chip->cool_temp_c)
+			/*Slightly Cool  to Cool */
+			temp_state = POWER_SUPPLY_HEALTH_COOL;
+		else
+			/* Stay Slightly Cool  */
+			temp_state = POWER_SUPPLY_HEALTH_SLIGHTLY_COOL;
+	} else if (chip->temp_state == POWER_SUPPLY_HEALTH_COOL) {
+		if (batt_temp >=
+		    chip->cool_temp_c + HYSTERISIS_DEGC)
+			/*Cool to Slightly Cool  */
+			temp_state = POWER_SUPPLY_HEALTH_SLIGHTLY_COOL;
+		else if (batt_temp <= chip->cold_temp_c)
+			/* Cool to Cold */
+			temp_state = POWER_SUPPLY_HEALTH_COLD;
+		else
+			/* Stay Cool */
+			temp_state = POWER_SUPPLY_HEALTH_COOL;
+	} else if (chip->temp_state == POWER_SUPPLY_HEALTH_COLD) {
+		if (batt_temp >=
+		    chip->cold_temp_c + HYSTERISIS_DEGC)
+			/* Cold to Cool */
+			temp_state = POWER_SUPPLY_HEALTH_COOL;
+		else
+			/* Stay Cold */
+			temp_state = POWER_SUPPLY_HEALTH_COLD;
+	} else if (chip->temp_state == POWER_SUPPLY_HEALTH_OVERHEAT) {
+		if (batt_temp <= max_temp - HYSTERISIS_DEGC)
+			/* Hot to Warm */
+			temp_state = POWER_SUPPLY_HEALTH_WARM;
+		else
+			/* Stay Hot */
+			temp_state = POWER_SUPPLY_HEALTH_OVERHEAT;
 	}
 
-	if (chip->temp_state != next_state) {
-		dev_err(chip->dev, "Battery Temp State: %s -> %s at %dC\n",
-			smb_health_text[chip->temp_state],
-			smb_health_text[next_state], batt_temp);
-		chip->temp_state = next_state;
+	if (chip->temp_state != temp_state) {
+		chip->temp_state = temp_state;
+		dev_err(chip->dev, "Battery Temp State = %s\n",
+			smb_health_text[chip->temp_state]);
 	}
 	mutex_unlock(&chip->check_temp_lock);
 
@@ -8402,7 +8446,7 @@ static int smbchg_probe(struct spmi_device *spmi)
 	int rc;
 	struct smbchg_chip *chip;
 	struct power_supply *usb_psy;
-	struct qpnp_vadc_chip *vadc_dev =  NULL;
+	struct qpnp_vadc_chip *vadc_dev;
 
 
 	usb_psy = power_supply_get_by_name("usb");
@@ -8586,6 +8630,13 @@ static int smbchg_probe(struct spmi_device *spmi)
 				&dev_attr_factory_image_mode);
 	if (rc) {
 		pr_err("couldn't create factory_image_mode\n");
+		goto unregister_dc_psy;
+	}
+
+	rc = device_create_file(chip->dev,
+				&dev_attr_factory_charge_upper);
+	if (rc) {
+		pr_err("couldn't create factory_charge_upper\n");
 		goto unregister_dc_psy;
 	}
 

@@ -11,6 +11,7 @@
  */
 
 #include "msm8953.dtsi"
+#include "msm-pmi8950.dtsi"
 #include "msm8953-pinctrl.dtsi"
 #include "msm8953-sanders-pinctrl.dtsi"
 #include "dsi-panel-mot-dummy-qhd-video.dtsi"
@@ -816,7 +817,7 @@
 	qcom,usbid-disabled;
 	qcom,usbid-gpio-enabled;
 	qcom,force-aicl-rerun;
-	qcom,auto-voltage-comp-mv = <75>;
+	qcom,auto-voltage-comp-mv = <150>;
 	qcom,enable-hvdcp-9v;
 	qcom,enable-factory-wa;
 	qcom,enable-charging-limit;

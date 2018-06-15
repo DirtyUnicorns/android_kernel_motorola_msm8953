@@ -125,8 +125,10 @@ static char get_cacheflag(const struct kgsl_memdesc *m)
 }
 
 
-static int print_mem_entry(struct seq_file *s, struct kgsl_mem_entry *entry)
+static int print_mem_entry(void *data, void *ptr)
 {
+	struct seq_file *s = data;
+	struct kgsl_mem_entry *entry = ptr;
 	char flags[9];
 	char usage[16];
 	struct kgsl_memdesc *m = &entry->memdesc;
@@ -144,11 +146,12 @@ static int print_mem_entry(struct seq_file *s, struct kgsl_mem_entry *entry)
 	flags[8] = '\0';
 
 	kgsl_get_memory_usage(usage, sizeof(usage), m->flags);
+
 	if (usermem_type == KGSL_MEM_ENTRY_ION)
 		kgsl_get_egl_counts(entry, &egl_surface_count,
-				    &egl_image_count);
+						&egl_image_count);
 
-	seq_printf(s, "%pK %pK %16llu %5d %9s %10s %16s %5d %16llu %3d %3d",
+	seq_printf(s, "%pK %pK %16llu %5d %9s %10s %16s %5d %16llu %6d %6d",
 			(uint64_t *)(uintptr_t) m->gpuaddr,
 			(unsigned long *) m->useraddr,
 			m->size, entry->id, flags,
@@ -164,72 +167,75 @@ static int print_mem_entry(struct seq_file *s, struct kgsl_mem_entry *entry)
 	return 0;
 }
 
-
-static struct kgsl_mem_entry *process_mem_seq_find(
-			struct seq_file *s, void *v, loff_t l)
+static struct kgsl_mem_entry *process_mem_seq_find(struct seq_file *s,
+						void *ptr, loff_t pos)
 {
+	struct kgsl_mem_entry *entry = ptr;
 	struct kgsl_process_private *private = s->private;
-	struct kgsl_mem_entry *entry = v;
 	int id = 0;
+	loff_t temp_pos = 1;
 
-	l--;
-	spin_lock(&private->mem_lock);
 	if (entry != SEQ_START_TOKEN)
 		id = entry->id + 1;
+
+	spin_lock(&private->mem_lock);
 	for (entry = idr_get_next(&private->mem_idr, &id); entry;
-			id++, entry = idr_get_next(&private->mem_idr, &id)) {
-		if (l-- == 0) {
-			if (kgsl_mem_entry_get(entry))
-				goto found;
-			l++;
+		id++, entry = idr_get_next(&private->mem_idr, &id),
+							temp_pos++) {
+		if (temp_pos == pos && kgsl_mem_entry_get(entry)) {
+			spin_unlock(&private->mem_lock);
+			goto found;
 		}
 	}
+	spin_unlock(&private->mem_lock);
+
 	entry = NULL;
 found:
-	spin_unlock(&private->mem_lock);
-	if (v != SEQ_START_TOKEN)
-		kgsl_mem_entry_put(v);
+	if (ptr != SEQ_START_TOKEN)
+		kgsl_mem_entry_put(ptr);
+
 	return entry;
 }
 
 static void *process_mem_seq_start(struct seq_file *s, loff_t *pos)
 {
-	loff_t l = *pos;
+	loff_t seq_file_offset = *pos;
 
-	if (l == 0)
+	if (seq_file_offset == 0)
 		return SEQ_START_TOKEN;
 	else
-		return process_mem_seq_find(s, SEQ_START_TOKEN, l);
+		return process_mem_seq_find(s, SEQ_START_TOKEN,
+						seq_file_offset);
 }
 
-static void *process_mem_seq_next(struct seq_file *s, void *v, loff_t *pos)
+static void process_mem_seq_stop(struct seq_file *s, void *ptr)
+{
+	if (ptr && ptr != SEQ_START_TOKEN)
+		kgsl_mem_entry_put(ptr);
+}
+
+static void *process_mem_seq_next(struct seq_file *s, void *ptr,
+							loff_t *pos)
 {
 	++*pos;
-	return process_mem_seq_find(s, v, 1);
+	return process_mem_seq_find(s, ptr, 1);
 }
 
-static void process_mem_seq_stop(struct seq_file *s, void *v)
+static int process_mem_seq_show(struct seq_file *s, void *ptr)
 {
-	if (v && v != SEQ_START_TOKEN)
-		kgsl_mem_entry_put(v);
+	if (ptr == SEQ_START_TOKEN) {
+		seq_printf(s, "%16s %16s %16s %5s %9s %10s %16s %5s %16s %6s %6s\n",
+			"gpuaddr", "useraddr", "size", "id", "flags", "type",
+			"usage", "sglen", "mapsize", "eglsrf", "eglimg");
+		return 0;
+	} else
+		return print_mem_entry(s, ptr);
 }
 
-static int process_mem_seq_show(struct seq_file *s, void *v)
-{
-	if (v == SEQ_START_TOKEN)
-		seq_printf(s, "%16s %16s %16s %5s %9s %10s %16s %5s %16s %3s %3s\n",
-			   "gpuaddr", "useraddr", "size", "id", "flags", "type",
-			   "usage", "sglen", "mapsize", "srf", "img");
-	else
-		print_mem_entry(s, v);
-
-	return 0;
-}
-
-static const struct seq_operations process_mem_seq_ops = {
+static const struct seq_operations process_mem_seq_fops = {
 	.start = process_mem_seq_start,
-	.next = process_mem_seq_next,
 	.stop = process_mem_seq_stop,
+	.next = process_mem_seq_next,
 	.show = process_mem_seq_show,
 };
 
@@ -237,6 +243,7 @@ static int process_mem_open(struct inode *inode, struct file *file)
 {
 	int ret;
 	pid_t pid = (pid_t) (unsigned long) inode->i_private;
+	struct seq_file *s = NULL;
 	struct kgsl_process_private *private = NULL;
 
 	private = kgsl_process_private_find(pid);
@@ -244,12 +251,11 @@ static int process_mem_open(struct inode *inode, struct file *file)
 	if (!private)
 		return -ENODEV;
 
-	ret = seq_open(file, &process_mem_seq_ops);
-	if (ret) {
+	ret = seq_open(file, &process_mem_seq_fops);
+	if (ret)
 		kgsl_process_private_put(private);
-	} else {
-		struct seq_file *s = file->private_data;
-
+	else {
+		s = file->private_data;
 		s->private = private;
 	}
 
@@ -274,6 +280,29 @@ static const struct file_operations process_mem_fops = {
 	.release = process_mem_release,
 };
 
+
+static int globals_print(struct seq_file *s, void *unused)
+{
+	kgsl_print_global_pt_entries(s);
+	return 0;
+}
+
+static int globals_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, globals_print, NULL);
+}
+
+static int globals_release(struct inode *inode, struct file *file)
+{
+	return single_release(inode, file);
+}
+
+static const struct file_operations global_fops = {
+	.open = globals_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = globals_release,
+};
 
 /**
  * kgsl_process_init_debugfs() - Initialize debugfs for a process
@@ -321,6 +350,9 @@ void kgsl_core_debugfs_init(void)
 	struct dentry *debug_dir;
 
 	kgsl_debugfs_dir = debugfs_create_dir("kgsl", NULL);
+
+	debugfs_create_file("globals", 0444, kgsl_debugfs_dir, NULL,
+		&global_fops);
 
 	debug_dir = debugfs_create_dir("debug", kgsl_debugfs_dir);
 

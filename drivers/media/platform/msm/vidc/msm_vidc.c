@@ -363,7 +363,7 @@ static struct msm_smem *map_buffer(struct msm_vidc_inst *inst,
 	struct msm_smem *handle = NULL;
 	handle = msm_comm_smem_user_to_kernel(inst,
 				p->reserved[0],
-				p->length,
+				p->reserved[1],
 				buffer_type);
 	if (!handle) {
 		dprintk(VIDC_ERR,
@@ -439,10 +439,8 @@ int map_and_register_buf(struct msm_vidc_inst *inst, struct v4l2_buffer *b)
 		goto exit;
 	}
 
-	dprintk(VIDC_DBG,
-		"[MAP] Create binfo = %pK fd = %d size = %d type = %d\n",
-		binfo, b->m.planes[0].reserved[0],
-		b->m.planes[0].length, b->type);
+	dprintk(VIDC_DBG, "[MAP] Create binfo = %pK fd = %d type = %d\n",
+			binfo, b->m.planes[0].reserved[0], b->type);
 
 	for (i = 0; i < b->length; ++i) {
 		rc = 0;
@@ -957,8 +955,7 @@ int msm_vidc_dqbuf(void *instance, struct v4l2_buffer *b)
 	if (rc)
 		return rc;
 
-	if (is_dynamic_output_buffer_mode(b, inst) ||
-		is_encoder_input_buffer(b, inst)) {
+	if (is_dynamic_output_buffer_mode(b, inst)) {
 		buffer_info->dequeued = true;
 
 		dprintk(VIDC_DBG, "[DEQUEUED]: fd[0] = %d\n",
@@ -1339,6 +1336,11 @@ int msm_vidc_destroy(struct msm_vidc_inst *inst)
 
 	for (i = 0; i < MAX_PORT_NUM; i++)
 		vb2_queue_release(&inst->bufq[i].vb2_bufq);
+
+	mutex_destroy(&inst->sync_lock);
+	mutex_destroy(&inst->bufq[CAPTURE_PORT].lock);
+	mutex_destroy(&inst->bufq[OUTPUT_PORT].lock);
+	mutex_destroy(&inst->lock);
 
 	msm_vidc_debugfs_deinit_inst(inst);
 	pr_info(VIDC_DBG_TAG "Closed video instance: %pK\n",

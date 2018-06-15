@@ -173,9 +173,7 @@ static struct srcu_struct pmus_srcu;
  *   2 - disallow kernel profiling for unpriv
  *   3 - disallow all unpriv perf event use
  */
-#ifdef CONFIG_PERF_EVENTS_USERMODE
-int sysctl_perf_event_paranoid __read_mostly = -1;
-#elif defined CONFIG_SECURITY_PERF_EVENTS_RESTRICT
+#ifdef CONFIG_SECURITY_PERF_EVENTS_RESTRICT
 int sysctl_perf_event_paranoid __read_mostly = 3;
 #else
 int sysctl_perf_event_paranoid __read_mostly = 1;
@@ -3628,7 +3626,10 @@ static int perf_release(struct inode *inode, struct file *file)
 	if ((event->state == PERF_EVENT_STATE_OFF) &&
 	    event->attr.constraint_duplicate)
 		event->state = PERF_EVENT_STATE_ACTIVE;
+
+	get_online_cpus();
 	put_event(file->private_data);
+	put_online_cpus();
 	return 0;
 }
 
@@ -7762,6 +7763,7 @@ SYSCALL_DEFINE5(perf_event_open,
 		 * the old lists, before installing it on new lists.
 		 */
 		synchronize_rcu();
+
 		perf_install_in_context(ctx, group_leader, group_leader->cpu);
 		get_ctx(ctx);
 		list_for_each_entry(sibling, &group_leader->sibling_list,
@@ -8349,7 +8351,7 @@ static int perf_event_init_context(struct task_struct *child, int ctxn)
 		ret = inherit_task_group(event, parent, parent_ctx,
 					 child, ctxn, &inherited_all);
 		if (ret)
-			break;
+			goto out_unlock;
 	}
 
 	/*
@@ -8365,7 +8367,7 @@ static int perf_event_init_context(struct task_struct *child, int ctxn)
 		ret = inherit_task_group(event, parent, parent_ctx,
 					 child, ctxn, &inherited_all);
 		if (ret)
-			break;
+			goto out_unlock;
 	}
 
 	raw_spin_lock_irqsave(&parent_ctx->lock, flags);
@@ -8393,6 +8395,7 @@ static int perf_event_init_context(struct task_struct *child, int ctxn)
 	}
 
 	raw_spin_unlock_irqrestore(&parent_ctx->lock, flags);
+out_unlock:
 	mutex_unlock(&parent_ctx->mutex);
 
 	perf_unpin_context(parent_ctx);
@@ -8541,6 +8544,7 @@ static void perf_event_exit_cpu(int cpu)
 {
 	perf_event_exit_cpu_context(cpu);
 }
+
 #else
 static inline void perf_event_exit_cpu(int cpu) { }
 static inline void perf_event_start_swclock(int cpu) { }

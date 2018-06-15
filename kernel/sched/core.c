@@ -4412,7 +4412,8 @@ void set_task_cpu(struct task_struct *p, unsigned int new_cpu)
 		if (p->sched_class->migrate_task_rq)
 			p->sched_class->migrate_task_rq(p, new_cpu);
 		p->se.nr_migrations++;
-                perf_sw_event_sched(PERF_COUNT_SW_CPU_MIGRATIONS, 1, 0);
+		perf_sw_event(PERF_COUNT_SW_CPU_MIGRATIONS, 1, NULL, 0);
+
 		fixup_busy_time(p, new_cpu);
 	}
 
@@ -5281,6 +5282,10 @@ static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
 	memset(&p->se.statistics, 0, sizeof(p->se.statistics));
 #endif
 
+#ifdef CONFIG_CPU_FREQ_STAT
+	cpufreq_task_stats_init(p);
+#endif
+
 	RB_CLEAR_NODE(&p->dl.rb_node);
 	hrtimer_init(&p->dl.dl_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	__dl_clear_params(p);
@@ -5680,6 +5685,9 @@ prepare_task_switch(struct rq *rq, struct task_struct *prev,
 #ifdef CONFIG_MSM_APP_SETTINGS
 	if (use_app_setting)
 		switch_app_setting_bit(prev, next);
+
+	if (use_32bit_app_setting || use_32bit_app_setting_pro)
+		switch_32bit_app_setting_bit(prev, next);
 #endif
 }
 
@@ -8125,16 +8133,13 @@ void show_state_filter(unsigned long state_filter)
 		/*
 		 * reset the NMI-timeout, listing all files on a slow
 		 * console might take a lot of time:
-		 * Also, reset softlockup watchdogs on all CPUs, because
-		 * another CPU might be blocked waiting for us to process
-		 * an IPI.
 		 */
 		touch_nmi_watchdog();
-		touch_all_softlockup_watchdogs();
 		if (!state_filter || (p->state & state_filter))
 			sched_show_task(p);
 	}
 
+	touch_all_softlockup_watchdogs();
 
 #ifdef CONFIG_SYSRQ_SCHED_DEBUG
 	sysrq_sched_debug_show();
@@ -9403,9 +9408,6 @@ enum s_alloc {
  * Build an iteration mask that can exclude certain CPUs from the upwards
  * domain traversal.
  *
- * Only CPUs that can arrive at this group should be considered to continue
- * balancing.
- *
  * Asymmetric node setups can result in situations where the domain tree is of
  * unequal depth, make sure to skip domains that already cover the entire
  * range.
@@ -9417,31 +9419,18 @@ enum s_alloc {
  */
 static void build_group_mask(struct sched_domain *sd, struct sched_group *sg)
 {
-	const struct cpumask *sg_span = sched_group_cpus(sg);
+	const struct cpumask *span = sched_domain_span(sd);
 	struct sd_data *sdd = sd->private;
 	struct sched_domain *sibling;
 	int i;
 
-	for_each_cpu(i, sg_span) {
+	for_each_cpu(i, span) {
 		sibling = *per_cpu_ptr(sdd->sd, i);
-
-		/*
-		 * Can happen in the asymmetric case, where these siblings are
-		 * unused. The mask will not be empty because those CPUs that
-		 * do have the top domain _should_ span the domain.
-		 */
-		if (!sibling->child)
-			continue;
-
-		/* If we would not end up here, we can't continue from here */
-		if (!cpumask_equal(sg_span, sched_domain_span(sibling->child)))
+		if (!cpumask_test_cpu(i, sched_domain_span(sibling)))
 			continue;
 
 		cpumask_set_cpu(i, sched_group_mask(sg));
 	}
-
-	/* We must not have empty masks here */
-	WARN_ON_ONCE(cpumask_empty(sched_group_mask(sg)));
 }
 
 /*

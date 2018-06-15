@@ -232,6 +232,7 @@ struct smbchg_chip {
 	bool				force_aicl_rerun;
 	bool				enable_hvdcp_9v;
 	bool				prop_flash_active;
+	bool				pd_charger_force_5v;
 	u32				wa_flags;
 	u8				original_usbin_allowance;
 	struct parallel_usb_cfg		parallel;
@@ -1054,6 +1055,7 @@ static enum power_supply_property smbchg_battery_properties[] = {
 	POWER_SUPPLY_PROP_AGE,
 	POWER_SUPPLY_PROP_EXTERN_STATE,
 	POWER_SUPPLY_PROP_FLASH_ACTIVE,
+	POWER_SUPPLY_PROP_CURRENT_MAX,
 };
 
 static int get_eb_pwr_prop(struct smbchg_chip *chip,
@@ -1921,7 +1923,7 @@ static int smbchg_otg_pulse_skip_disable(struct smbchg_chip *chip,
 		return 0;
 	disabled = !!chip->otg_pulse_skip_dis;
 
-	rc = smbchg_sec_masked_write(chip, chip->otg_base + OTG_TRIM6,
+	rc = smbchg_sec_masked_write_fac(chip, chip->otg_base + OTG_TRIM6,
 			TR_ENB_SKIP_BIT, disabled ? TR_ENB_SKIP_BIT : 0);
 	if (rc < 0) {
 		SMB_ERR(chip,
@@ -1944,7 +1946,7 @@ static int smbchg_charging_en(struct smbchg_chip *chip, bool en)
 		&& (chip->is_factory_image))
 		en = 0;
 
-	if (en && chip->otg_enabled) {
+	if (en && chip->otg_enabled && (chip->ebchg_state != EB_SRC)) {
 		mask |= OTG_EN;
 		chip->otg_enabled = false;
 		smbchg_otg_pulse_skip_disable(chip, REASON_OTG_ENABLED, false);
@@ -2125,8 +2127,12 @@ static int smbchg_battchg_en(struct smbchg_chip *chip, bool enable,
 	mutex_lock(&chip->battchg_disabled_lock);
 	if (!enable)
 		battchg_disabled = chip->battchg_disabled | reason;
-	else
+	else {
 		battchg_disabled = chip->battchg_disabled & (~reason);
+		if (chip->otg_enabled)
+			*changed = false;
+		goto out;
+	}
 
 	/* avoid unnecessary spmi interactions if nothing changed */
 	if (!!battchg_disabled == !!chip->battchg_disabled) {
@@ -2146,8 +2152,10 @@ static int smbchg_battchg_en(struct smbchg_chip *chip, bool enable,
 	SMB_DBG(chip, "batt charging %s, battchg_disabled = %02x\n",
 			battchg_disabled == 0 ? "enabled" : "disabled",
 			battchg_disabled);
-out:
+
 	chip->battchg_disabled = battchg_disabled;
+
+out:
 	mutex_unlock(&chip->battchg_disabled_lock);
 	return rc;
 }
@@ -3815,6 +3823,7 @@ static int smbchg_battery_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_FLASH_CURRENT_MAX:
 		val->intval = smbchg_calc_max_flash_current(chip);
 		break;
+	case POWER_SUPPLY_PROP_CURRENT_MAX:
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
 		val->intval = chip->fastchg_current_ma * 1000;
 		break;
@@ -5279,10 +5288,14 @@ static int smb_psy_notifier_call(struct notifier_block *nb, unsigned long val,
 	SMB_DBG(chip, "online = %d, type = %d, current = %d, disabled = %d\n",
 			online, prop.intval, chip->cl_usbc, disabled);
 
-	if (online && prop.intval == POWER_SUPPLY_TYPE_USBC_SINK) {
+	if (online &&
+	    (chip->usbc_online || is_usb_present(chip)) &&
+	    (prop.intval == POWER_SUPPLY_TYPE_USBC_SINK ||
+	     prop.intval == POWER_SUPPLY_TYPE_USBC_AUDIO)) {
 		/* Skip notifying insertion if already done */
 		if (!chip->usbc_online) {
 			chip->usbc_online = true;
+			cancel_delayed_work(&chip->usb_insertion_work);
 			schedule_delayed_work(&chip->usb_insertion_work,
 				      msecs_to_jiffies(100));
 		}
@@ -5448,7 +5461,7 @@ static int smbchg_otg_regulator_enable(struct regulator_dev *rdev)
 	smbchg_otg_pulse_skip_disable(chip, REASON_OTG_ENABLED, true);
 	msleep(20);
 	chip->otg_retries = 0;
-	rc = smbchg_masked_write(chip, chip->bat_if_base + CMD_CHG_REG,
+	rc = smbchg_masked_write_fac(chip, chip->bat_if_base + CMD_CHG_REG,
 			OTG_EN, OTG_EN);
 	if (rc < 0) {
 		SMB_ERR(chip, "Couldn't enable OTG mode rc=%d\n", rc);
@@ -5470,7 +5483,7 @@ static int smbchg_otg_regulator_disable(struct regulator_dev *rdev)
 	if (chip->usbc_disabled)
 		return 0;
 
-	rc = smbchg_masked_write(chip, chip->bat_if_base + CMD_CHG_REG,
+	rc = smbchg_masked_write_fac(chip, chip->bat_if_base + CMD_CHG_REG,
 			OTG_EN, 0);
 	if (rc < 0) {
 		SMB_ERR(chip, "Couldn't disable OTG mode rc=%d\n", rc);
@@ -5733,7 +5746,7 @@ static void set_target_bsw_current_ma(struct smbchg_chip *chip,
 static void set_max_allowed_current_ma(struct smbchg_chip *chip,
 				       int current_ma)
 {
-	if (!chip->usb_present && !chip->usbeb_present) {
+	if (!chip->usb_present && chip->wls_present) {
 		SMB_DBG(chip, "NO allowed current, No USB\n");
 		chip->target_fastchg_current_ma = current_ma;
 		return;
@@ -6466,7 +6479,11 @@ static void usb_insertion_work(struct work_struct *work)
 
 	smbchg_get_extbat_in_vl(chip);
 
-	usbc_volt = USBC_9V_MODE;
+	if (chip->pd_charger_force_5v)
+		usbc_volt = USBC_5V_MODE;
+	else
+		usbc_volt = USBC_9V_MODE;
+
 	if ((chip->ebchg_state == EB_SINK) && chip->vi_ebsrc &&
 	    (chip->vi_ebsrc < USBC_9V_MODE))
 		usbc_volt = USBC_5V_MODE;
@@ -6664,6 +6681,11 @@ static void handle_usb_insertion(struct smbchg_chip *chip)
 		SMB_DBG(chip, "setting usb psy type = %d\n",
 				chip->supply_type);
 		power_supply_set_supply_type(chip->usb_psy, chip->supply_type);
+
+		SMB_DBG(chip, "setting usb max voltage = %d\n",
+				USBC_5V_MODE * 1000);
+		power_supply_set_voltage_limit(chip->usb_psy,
+							(USBC_5V_MODE * 1000));
 
 		/*
 		 * If we are using the data lines, take ownership first. If not,
@@ -7703,7 +7725,7 @@ static int smbchg_hw_init(struct smbchg_chip *chip)
 	/* Configure OTG */
 	if (chip->schg_version == QPNP_SCHG_LITE) {
 		/* enable OTG hiccup mode */
-		rc = smbchg_sec_masked_write(chip, chip->otg_base + OTG_CFG,
+		rc = smbchg_sec_masked_write_fac(chip, chip->otg_base + OTG_CFG,
 			HICCUP_ENABLED_BIT, HICCUP_ENABLED_BIT);
 		if (rc < 0)
 			SMB_ERR(chip, "Couldn't set OTG OC config rc = %d\n",
@@ -7711,7 +7733,7 @@ static int smbchg_hw_init(struct smbchg_chip *chip)
 	}
 
 	/* configure OTG enable to cmd ctrl */
-	rc = smbchg_sec_masked_write(chip, chip->otg_base + OTG_CFG,
+	rc = smbchg_sec_masked_write_fac(chip, chip->otg_base + OTG_CFG,
 				     OTG_EN_CTRL_MASK,
 				     (chip->schg_version == QPNP_SCHG_LITE) ?
 				     OTG_CMD_CTRL_RID_EN :
@@ -7723,7 +7745,7 @@ static int smbchg_hw_init(struct smbchg_chip *chip)
 	}
 
 	/* Configure OTG current limit */
-	rc = smbchg_sec_masked_write(chip, chip->otg_base + OTG_ICFG,
+	rc = smbchg_sec_masked_write_fac(chip, chip->otg_base + OTG_ICFG,
 			OTG_ILIMIT_MASK,
 			OTG_ILIMIT_1000MA);
 	if (rc < 0)
@@ -8020,7 +8042,7 @@ static void parse_dt_gpio(struct smbchg_chip *chip)
 		return;
 	}
 
-	if (!of_gpio_count(node)) {
+	if (of_gpio_count(node) <= 0) {
 		SMB_ERR(chip, "No GPIOS defined.\n");
 		return;
 	}
@@ -8029,6 +8051,11 @@ static void parse_dt_gpio(struct smbchg_chip *chip)
 	chip->ebchg_gpio.flags = flags;
 	of_property_read_string_index(node, "gpio-names", 0,
 				      &chip->ebchg_gpio.label);
+
+	if (!gpio_is_valid(chip->ebchg_gpio.gpio)) {
+		SMB_ERR(chip, "eb GPIO is invalid\n");
+		return;
+	}
 
 	rc = gpio_request_one(chip->ebchg_gpio.gpio,
 			      chip->ebchg_gpio.flags,
@@ -8055,6 +8082,11 @@ static void parse_dt_gpio(struct smbchg_chip *chip)
 	chip->warn_gpio.flags = flags;
 	of_property_read_string_index(node, "gpio-names", 1,
 				      &chip->warn_gpio.label);
+
+	if (!gpio_is_valid(chip->warn_gpio.gpio)) {
+		SMB_ERR(chip, "warn GPIO is invalid\n");
+		return;
+	}
 
 	rc = gpio_request_one(chip->warn_gpio.gpio,
 			      chip->warn_gpio.flags,
@@ -8083,6 +8115,11 @@ static void parse_dt_gpio(struct smbchg_chip *chip)
 	chip->togl_rst_gpio.flags = flags;
 	of_property_read_string_index(node, "gpio-names", 2,
 				      &chip->togl_rst_gpio.label);
+
+	if (!gpio_is_valid(chip->togl_rst_gpio.gpio)) {
+		SMB_ERR(chip, "togl_rst GPIO is invalid\n");
+		return;
+	}
 
 	rc = gpio_request_one(chip->togl_rst_gpio.gpio,
 			      chip->togl_rst_gpio.flags,
@@ -8366,6 +8403,8 @@ static int smb_parse_dt(struct smbchg_chip *chip)
 					"mmi,fake-factory-type");
 	chip->prop_flash_active = of_property_read_bool(node,
 					"qcom,prop-flash-active");
+	chip->pd_charger_force_5v = of_property_read_bool(node,
+					"qcom,pd-charger-force-5v");
 	/* parse the battery missing detection pin source */
 	rc = of_property_read_string(chip->spmi->dev.of_node,
 		"qcom,bmd-pin-src", &bpd);
@@ -9402,6 +9441,28 @@ static int create_debugfs_entries(struct smbchg_chip *chip)
 }
 
 #define CHG_SHOW_MAX_SIZE 50
+
+static ssize_t factory_charge_upper_show(struct device *dev,
+				    struct device_attribute *attr,
+				    char *buf)
+{
+	int state;
+
+	if (!the_chip) {
+		pr_err("chip not valid\n");
+		return -ENODEV;
+	}
+
+	state = the_chip->upper_limit_capacity;
+
+	return scnprintf(buf, CHG_SHOW_MAX_SIZE, "%d\n", state);
+
+}
+
+static DEVICE_ATTR(factory_charge_upper, 0444,
+		factory_charge_upper_show,
+		NULL);
+
 static ssize_t force_demo_mode_store(struct device *dev,
 				struct device_attribute *attr,
 				const char *buf, size_t count)
@@ -10179,6 +10240,9 @@ static void smbchg_set_temp_chgpath(struct smbchg_chip *chip, int prev_temp)
 			smbchg_set_parallel_vfloat(chip,
 						   chip->vfloat_parallel_mv);
 	}
+
+	if (chip->stepchg_state == STEP_NONE)
+		return;
 
 	if (chip->ext_high_temp ||
 	    (chip->temp_state == POWER_SUPPLY_HEALTH_COLD) ||
@@ -11150,8 +11214,8 @@ static void smbchg_heartbeat_work(struct work_struct *work)
 			    taper_ma)
 				batt_ma -= STEPCHG_CURR_ADJ;
 
-			if ((batt_ma <= taper_ma) &&
-			    (chip->allowed_fastchg_current_ma >= taper_ma))
+			if (batt_ma <= min(taper_ma,
+					chip->allowed_fastchg_current_ma))
 				if (chip->stepchg_state_holdoff >= 2) {
 					change_state = true;
 					chip->stepchg_state_holdoff = 0;
@@ -11531,12 +11595,12 @@ static int smbchg_reboot(struct notifier_block *nb,
 {
 	struct smbchg_chip *chip =
 			container_of(nb, struct smbchg_chip, smb_reboot);
-	int rc, i;
+	int rc = 0, i = 0;
 	int usbc_volt_mv;
 	char eb_able;
 	int soc_max = 99;
 
-	SMB_DBG(chip, "SMB Reboot\n");
+	SMB_ERR(chip, "SMB Reboot\n");
 	if (!chip) {
 		SMB_WARN(chip, "called before chip valid!\n");
 		return NOTIFY_DONE;
@@ -11551,42 +11615,54 @@ static int smbchg_reboot(struct notifier_block *nb,
 	atomic_set(&chip->hb_ready, 0);
 	cancel_delayed_work_sync(&chip->heartbeat_work);
 
-	if (chip->factory_mode) {
-		switch (event) {
-		case SYS_POWER_OFF:
+	switch (event) {
+	case SYS_POWER_OFF:
+
+		/* Disable Charging */
+		smbchg_charging_en(chip, 0);
+
+		/* Suspend USB and DC */
+		smbchg_usb_suspend(chip, true);
+		smbchg_dc_suspend(chip, true);
+
+		if (chip->usb_psy && chip->usb_present) {
+			SMB_DBG(chip, "setting usb psy dp=r dm=r\n");
+			power_supply_set_dp_dm(chip->usb_psy,
+					POWER_SUPPLY_DP_DM_DPR_DMR);
+		}
+
+		rc = smbchg_sec_masked_write(chip,
+			chip->usb_chgpth_base + CHGPTH_CFG,
+			HVDCP_EN_BIT, 0);
+		if (rc < 0) {
+			SMB_ERR(chip, "Couldn't disable HVDCP rc=%d\n", rc);
+			return rc;
+		}
+
+		if (chip->factory_mode) {
 			/* Disable Factory Kill */
 			factory_kill_disable = true;
-			/* Disable Charging */
-			smbchg_charging_en(chip, 0);
-
-			/* Suspend USB and DC */
-			smbchg_usb_suspend(chip, true);
-			smbchg_dc_suspend(chip, true);
-
-			if (chip->usb_psy && chip->usb_present) {
-				SMB_DBG(chip, "setting usb psy dp=r dm=r\n");
-				power_supply_set_dp_dm(chip->usb_psy,
-						POWER_SUPPLY_DP_DM_DPR_DMR);
-			}
 
 			while (is_usb_present(chip))
 				msleep(100);
-			SMB_WARN(chip, "VBUS UV wait 1 sec!\n");
+			SMB_ERR(chip, "VBUS UV wait 1 sec! SYS_POWER_OFF\n");
 			/* Delay 1 sec to allow more VBUS decay */
 			msleep(1000);
-			break;
-		default:
-			break;
 		}
-	} else if ((get_prop_batt_capacity(chip) >= soc_max)  ||
-		   (get_eb_prop(chip, POWER_SUPPLY_PROP_CAPACITY) <= 0)) {
+		break;
+	default:
+		break;
+	}
+
+	if ((get_prop_batt_capacity(chip) >= soc_max)  ||
+	   (get_eb_prop(chip, POWER_SUPPLY_PROP_CAPACITY) <= 0)) {
 		/* Turn off any Ext batt charging */
-		SMB_WARN(chip, "Attempt to Shutdown EB!\n");
+		SMB_ERR(chip, "Attempt to Shutdown EB!\n");
 		smbchg_set_extbat_state(chip, EB_OFF, false);
 		gpio_set_value(chip->ebchg_gpio.gpio, 0);
 		gpio_free(chip->ebchg_gpio.gpio);
 	} else if ((chip->ebchg_state == EB_OFF) && !chip->usb_present) {
-		SMB_WARN(chip, "Attempt to Turn EB ON!\n");
+		SMB_ERR(chip, "Attempt to Turn EB ON!\n");
 		smbchg_set_extbat_state(chip, EB_SRC, false);
 	}
 
@@ -12053,6 +12129,13 @@ static int smbchg_probe(struct spmi_device *spmi)
 				&dev_attr_factory_image_mode);
 	if (rc) {
 		SMB_ERR(chip, "couldn't create factory_image_mode\n");
+		goto unregister_dc_psy;
+	}
+
+	rc = device_create_file(chip->dev,
+				&dev_attr_factory_charge_upper);
+	if (rc) {
+		SMB_ERR(chip, "couldn't create factory_charge_upper\n");
 		goto unregister_dc_psy;
 	}
 

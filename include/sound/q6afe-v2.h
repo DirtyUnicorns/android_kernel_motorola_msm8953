@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -336,11 +336,16 @@ int afe_send_custom_tdm_header_cfg(
 	struct afe_param_id_custom_tdm_header_cfg *custom_tdm_header_cfg,
 	u16 port_id);
 int afe_tdm_port_start(u16 port_id, struct afe_tdm_port_config *tdm_port,
-		u32 rate, u16 num_groups);
+		u32 rate);
 
 #ifdef CONFIG_SND_SOC_OPALUM
 int ospl2xx_afe_set_callback(int32_t (*ospl2xx_callback_func)
 				(struct apr_client_data *data));
 int ospl2xx_afe_apr_send_pkt(void *data, int index);
+#endif
+#ifdef CONFIG_SND_SOC_TAS2560
+int tas2560_algo_afe_set_callback(int32_t (*tas2560_algo_callback_func)
+				(struct apr_client_data *data));
+int tas2560_algo_afe_apr_send_pkt(void *data, int index);
 #endif
 #endif /* __Q6AFE_V2_H__ */

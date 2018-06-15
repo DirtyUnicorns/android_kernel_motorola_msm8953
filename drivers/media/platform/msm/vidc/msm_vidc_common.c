@@ -1098,8 +1098,7 @@ static void handle_event_change(enum hal_command_response cmd, void *data)
 		rc = msm_comm_g_ctrl_for_id(inst,
 			V4L2_CID_MPEG_VIDC_VIDEO_CONTINUE_DATA_TRANSFER);
 
-		if ((!IS_ERR_VALUE(rc) && rc == true) ||
-				is_thumbnail_session(inst)) {
+		if (!IS_ERR_VALUE(rc) && rc == true) {
 			event = V4L2_EVENT_SEQ_CHANGED_SUFFICIENT;
 
 			if (msm_comm_get_stream_output_mode(inst) ==
@@ -1767,36 +1766,6 @@ static struct vb2_buffer *get_vb_from_device_addr(struct buf_queue *bufq,
 	return vb;
 }
 
-
-static void handle_dynamic_input_buffer(struct msm_vidc_inst *inst,
-		ion_phys_addr_t device_addr)
-{
-	struct buffer_info *binfo = NULL, *temp = NULL;
-
-	if (inst->session_type == MSM_VIDC_ENCODER) {
-		binfo = device_to_uvaddr(&inst->registeredbufs, device_addr);
-		if (!binfo) {
-			dprintk(VIDC_ERR,
-				"%s buffer not found in registered list\n",
-				__func__);
-			return;
-		}
-		dprintk(VIDC_DBG,
-			"EBD fd[0] = %d -> EBD_ref_released, addr: %pa\n",
-			binfo->fd[0], &device_addr);
-
-		mutex_lock(&inst->registeredbufs.lock);
-		list_for_each_entry(temp, &inst->registeredbufs.list,
-				list) {
-			if (temp == binfo) {
-				binfo->pending_deletion = true;
-				break;
-			}
-		}
-		mutex_unlock(&inst->registeredbufs.lock);
-	}
-}
-
 static void handle_ebd(enum hal_command_response cmd, void *data)
 {
 	struct msm_vidc_cb_data_done *response = data;
@@ -1815,8 +1784,6 @@ static void handle_ebd(enum hal_command_response cmd, void *data)
 		dprintk(VIDC_WARN, "Got a response for an inactive session\n");
 		return;
 	}
-
-	handle_dynamic_input_buffer(inst, response->input_done.packet_buffer);
 
 	vb = get_vb_from_device_addr(&inst->bufq[OUTPUT_PORT],
 			response->input_done.packet_buffer);
@@ -2110,6 +2077,8 @@ static void handle_fbd(enum hal_command_response cmd, void *data)
 			vb->v4l2_buf.flags |= V4L2_QCOM_BUF_FLAG_READONLY;
 		if (fill_buf_done->flags1 & HAL_BUFFERFLAG_EOS)
 			vb->v4l2_buf.flags |= V4L2_QCOM_BUF_FLAG_EOS;
+		if (fill_buf_done->flags1 & HAL_BUFFERFLAG_ENDOFFRAME)
+			vb->v4l2_buf.flags |= V4L2_QCOM_BUF_FLAG_ENDOFFRAME;
 		if (fill_buf_done->flags1 & HAL_BUFFERFLAG_CODECCONFIG)
 			vb->v4l2_buf.flags &= ~V4L2_QCOM_BUF_FLAG_CODECCONFIG;
 		if (fill_buf_done->flags1 & HAL_BUFFERFLAG_SYNCFRAME)

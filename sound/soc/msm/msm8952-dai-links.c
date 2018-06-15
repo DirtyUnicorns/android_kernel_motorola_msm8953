@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -60,12 +60,6 @@ static struct snd_soc_ops msm8952_cpe_ops = {
 
 static struct snd_soc_ops msm8952_slimbus_2_be_ops = {
 	.hw_params = msm8952_slimbus_2_hw_params,
-};
-
-static struct snd_soc_ops msm_tdm_be_ops = {
-	.startup = msm_tdm_startup,
-	.hw_params = msm_tdm_snd_hw_params,
-	.shutdown = msm_tdm_shutdown,
 };
 
 static struct snd_soc_dai_link msm8952_tasha_fe_dai[] = {
@@ -143,7 +137,7 @@ static struct snd_soc_dai_link msm8952_tasha_fe_dai[] = {
 		.codec_name = "snd-soc-dummy",
 	},
 	/* QCHAT */
-	{/* hw:x,42 */
+	{/* hw:x,45 */
 		.name = "QCHAT",
 		.stream_name = "QCHAT",
 		.cpu_dai_name = "QCHAT",
@@ -159,6 +153,38 @@ static struct snd_soc_dai_link msm8952_tasha_fe_dai[] = {
 		.codec_dai_name = "snd-soc-dummy-dai",
 		.codec_name = "snd-soc-dummy",
 		.be_id = MSM_FRONTEND_DAI_QCHAT,
+	},
+	{/* hw:x,46 */
+		.name = "MSM8X16 Compress13",
+		.stream_name = "Compress13",
+		.cpu_dai_name	= "MultiMedia28",
+		.platform_name  = "msm-compress-dsp",
+		.dynamic = 1,
+		.dpcm_capture = 1,
+		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
+			 SND_SOC_DPCM_TRIGGER_POST},
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.codec_name = "snd-soc-dummy",
+		.ignore_suspend = 1,
+		.ignore_pmdown_time = 1,
+		 /* this dai link has capture support */
+		.be_id = MSM_FRONTEND_DAI_MULTIMEDIA28,
+	},
+	{/* hw:x,47 */
+		.name = "MSM8X16 Compress14",
+		.stream_name = "Compress14",
+		.cpu_dai_name	= "MultiMedia29",
+		.platform_name  = "msm-compress-dsp",
+		.dynamic = 1,
+		.dpcm_capture = 1,
+		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
+			 SND_SOC_DPCM_TRIGGER_POST},
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.codec_name = "snd-soc-dummy",
+		.ignore_suspend = 1,
+		.ignore_pmdown_time = 1,
+		 /* this dai link has capture support */
+		.be_id = MSM_FRONTEND_DAI_MULTIMEDIA29,
 	},
 };
 
@@ -319,20 +345,6 @@ static struct snd_soc_dai_link msm8952_tasha_be_dai[] = {
 		.ignore_suspend = 1,
 	},
 	{
-		.name = LPASS_BE_SLIMBUS_2_TX,
-		.stream_name = "Slimbus2 Capture",
-		.cpu_dai_name = "msm-dai-q6-dev.16389",
-		.platform_name = "msm-pcm-routing",
-		.codec_name = "tasha_codec",
-		.codec_dai_name = "tasha_tx4",
-		.no_pcm = 1,
-		.dpcm_capture = 1,
-		.be_id = MSM_BACKEND_DAI_SLIMBUS_2_TX,
-		.be_hw_params_fixup = msm_slim_2_tx_be_hw_params_fixup,
-		.ops = &msm8952_slimbus_be_ops,
-		.ignore_suspend = 1,
-	},
-	{
 		.name = LPASS_BE_SLIMBUS_3_RX,
 		.stream_name = "Slimbus3 Playback",
 		.cpu_dai_name = "msm-dai-q6-dev.16390",
@@ -368,11 +380,11 @@ static struct snd_soc_dai_link msm8952_tasha_be_dai[] = {
 		.cpu_dai_name = "msm-dai-q6-dev.16392",
 		.platform_name = "msm-pcm-routing",
 		.codec_name = "tasha_codec",
-		.codec_dai_name = "tasha_rx5",
+		.codec_dai_name = "tasha_mix_rx1",
 		.no_pcm = 1,
 		.dpcm_playback = 1,
 		.be_id = MSM_BACKEND_DAI_SLIMBUS_4_RX,
-		.be_hw_params_fixup = msm_slim_4_rx_be_hw_params_fixup,
+		.be_hw_params_fixup = msm_slim_0_rx_be_hw_params_fixup,
 		.ops = &msm8952_slimbus_be_ops,
 		/* dai link has playback support */
 		.ignore_pmdown_time = 1,
@@ -527,6 +539,7 @@ static struct snd_soc_dai_link msm8952_marley_mods_be_dai[] = {
 	}
 };
 
+#ifdef CONFIG_SND_SOC_MODS_CODEC_SHIM
 static struct snd_soc_dai_link msm8952_marley_albus_mods_be_dai[] = {
 	{
 		/* mods I2S in and out */
@@ -559,6 +572,7 @@ static struct snd_soc_dai_link msm8952_marley_albus_mods_be_dai[] = {
 		.ignore_suspend = 1,
 	}
 };
+#endif
 
 static struct snd_soc_dai_link msm8952_marley_be_dai[] = {
 	/* Backend DAI Links */
@@ -1517,70 +1531,6 @@ static struct snd_soc_dai_link msm8952_common_fe_dai[] = {
 	},
 };
 
-static struct snd_soc_dai_link msm8952_tdm_fe_dai[] = {
-	/* FE TDM DAI links */
-	{
-		.name = "Primary TDM RX 0 Hostless",
-		.stream_name = "Primary TDM RX 0 Hostless",
-		.cpu_dai_name = "PRI_TDM_RX_0_HOSTLESS",
-		.platform_name = "msm-pcm-hostless",
-		.dynamic = 1,
-		.dpcm_playback = 1,
-		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
-			SND_SOC_DPCM_TRIGGER_POST},
-		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
-		.ignore_suspend = 1,
-		.ignore_pmdown_time = 1,
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-	},
-	{
-		.name = "Primary TDM TX 0 Hostless",
-		.stream_name = "Primary TDM TX 0 Hostless",
-		.cpu_dai_name = "PRI_TDM_TX_0_HOSTLESS",
-		.platform_name = "msm-pcm-hostless",
-		.dynamic = 1,
-		.dpcm_capture = 1,
-		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
-			SND_SOC_DPCM_TRIGGER_POST},
-		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
-		.ignore_suspend = 1,
-		.ignore_pmdown_time = 1,
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-	},
-	{
-		.name = "Secondary TDM RX 0 Hostless",
-		.stream_name = "Secondary TDM RX 0 Hostless",
-		.cpu_dai_name = "SEC_TDM_RX_0_HOSTLESS",
-		.platform_name = "msm-pcm-hostless",
-		.dynamic = 1,
-		.dpcm_playback = 1,
-		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
-			SND_SOC_DPCM_TRIGGER_POST},
-		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
-		.ignore_suspend = 1,
-		.ignore_pmdown_time = 1,
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-	},
-	{
-		.name = "Secondary TDM TX 0 Hostless",
-		.stream_name = "Secondary TDM TX 0 Hostless",
-		.cpu_dai_name = "SEC_TDM_TX_0_HOSTLESS",
-		.platform_name = "msm-pcm-hostless",
-		.dynamic = 1,
-		.dpcm_capture = 1,
-		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
-			SND_SOC_DPCM_TRIGGER_POST},
-		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
-		.ignore_suspend = 1,
-		.ignore_pmdown_time = 1,
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-	},
-};
-
 static struct snd_soc_dai_link msm8952_common_be_dai[] = {
 	/* Primary AUX PCM Backend DAI Links */
 	{
@@ -1772,6 +1722,48 @@ static struct snd_soc_dai_link msm8952_hdmi_dba_dai_link[] = {
 	},
 };
 
+static const struct snd_soc_pcm_stream hdmi_dba_params = {
+	.formats = SNDRV_PCM_FMTBIT_S24_LE,
+	.rate_min = 48000,
+	.rate_max = 48000,
+	.channels_min = 1,
+	.channels_max = 2,
+};
+
+static struct snd_soc_dai_link msm8952_albus_hdmi_dba_dai_link[] = {
+	{
+		.name = "MARLEY-HDMI",
+		.stream_name = "MARLEY-HDMI DBA Playback",
+		.cpu_name = "marley-codec",
+		.cpu_dai_name = "marley-aif2", /* AIF2 on Rev 6 and beyond */
+		.codec_name = "msm-hdmi-dba-codec-rx",
+		.codec_dai_name = "msm_hdmi_dba_codec_rx_dai",
+		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
+			   SND_SOC_DAIFMT_CBS_CFS,
+		.no_pcm = 1,      /* has a backend */
+		.ignore_pmdown_time = 1,
+		.ignore_suspend = 1,
+		.params = &hdmi_dba_params,
+	},
+};
+
+static struct snd_soc_dai_link msm8952_ali_hdmi_dba_dai_link[] = {
+	{
+		.name = "MARLEY-HDMI",
+		.stream_name = "MARLEY-HDMI DBA Playback",
+		.cpu_name = "marley-codec",
+		.cpu_dai_name = "marley-aif1", /* ALI use aif1 */
+		.codec_name = "msm-hdmi-dba-codec-rx",
+		.codec_dai_name = "msm_hdmi_dba_codec_rx_dai",
+		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
+			   SND_SOC_DAIFMT_CBS_CFS,
+		.no_pcm = 1,      /* has a backend */
+		.ignore_pmdown_time = 1,
+		.ignore_suspend = 1,
+		.params = &hdmi_dba_params,
+	},
+};
+
 static struct snd_soc_dai_link msm8952_quin_dai_link[] = {
 	{
 		.name = LPASS_BE_QUIN_MI2S_RX,
@@ -1791,63 +1783,6 @@ static struct snd_soc_dai_link msm8952_quin_dai_link[] = {
 };
 
 static struct snd_soc_dai_link msm8952_tdm_be_dai_link[] = {
-	/* TDM be dai links */
-	{
-		.name = LPASS_BE_PRI_TDM_RX_0,
-		.stream_name = "Primary TDM0 Playback",
-		.cpu_dai_name = "msm-dai-q6-tdm.36864",
-		.platform_name = "msm-pcm-routing",
-		.codec_name = "msm-stub-codec.1",
-		.codec_dai_name = "msm-stub-rx",
-		.no_pcm = 1,
-		.dpcm_playback = 1,
-		.be_id = MSM_BACKEND_DAI_PRI_TDM_RX_0,
-		.be_hw_params_fixup = msm_tdm_be_hw_params_fixup,
-		.ops = &msm_tdm_be_ops,
-		.ignore_suspend = 1,
-	},
-	{
-		.name = LPASS_BE_PRI_TDM_TX_0,
-		.stream_name = "Primary TDM0 Capture",
-		.cpu_dai_name = "msm-dai-q6-tdm.36865",
-		.platform_name = "msm-pcm-routing",
-		.codec_name = "msm-stub-codec.1",
-		.codec_dai_name = "msm-stub-tx",
-		.no_pcm = 1,
-		.dpcm_capture = 1,
-		.be_id = MSM_BACKEND_DAI_PRI_TDM_TX_0,
-		.be_hw_params_fixup = msm_tdm_be_hw_params_fixup,
-		.ops = &msm_tdm_be_ops,
-		.ignore_suspend = 1,
-	},
-	{
-		.name = LPASS_BE_SEC_TDM_RX_0,
-		.stream_name = "Secondary TDM0 Playback",
-		.cpu_dai_name = "msm-dai-q6-tdm.36880",
-		.platform_name = "msm-pcm-routing",
-		.codec_name = "msm-stub-codec.1",
-		.codec_dai_name = "msm-stub-rx",
-		.no_pcm = 1,
-		.dpcm_playback = 1,
-		.be_id = MSM_BACKEND_DAI_SEC_TDM_RX_0,
-		.be_hw_params_fixup = msm_tdm_be_hw_params_fixup,
-		.ops = &msm_tdm_be_ops,
-		.ignore_suspend = 1,
-	},
-	{
-		.name = LPASS_BE_SEC_TDM_TX_0,
-		.stream_name = "Secondary TDM0 Capture",
-		.cpu_dai_name = "msm-dai-q6-tdm.36881",
-		.platform_name = "msm-pcm-routing",
-		.codec_name = "msm-stub-codec.1",
-		.codec_dai_name = "msm-stub-tx",
-		.no_pcm = 1,
-		.dpcm_capture = 1,
-		.be_id = MSM_BACKEND_DAI_SEC_TDM_TX_0,
-		.be_hw_params_fixup = msm_tdm_be_hw_params_fixup,
-		.ops = &msm_tdm_be_ops,
-		.ignore_suspend = 1,
-	},
 };
 
 static struct snd_soc_dai_link msm8952_afe_rxtx_lb_be_dai_link[] = {
@@ -1877,7 +1812,6 @@ static struct snd_soc_codec_conf *msm895x_codec_conf;
 static struct snd_soc_dai_link msm8952_tomtom_dai_links[
 ARRAY_SIZE(msm8952_common_fe_dai) +
 ARRAY_SIZE(msm8952_tomtom_fe_dai) +
-ARRAY_SIZE(msm8952_tdm_fe_dai) +
 ARRAY_SIZE(msm8952_common_be_dai) +
 ARRAY_SIZE(msm8952_tomtom_be_dai) +
 ARRAY_SIZE(msm8952_quin_dai_link) +
@@ -1887,7 +1821,6 @@ ARRAY_SIZE(msm8952_afe_rxtx_lb_be_dai_link)];
 static struct snd_soc_dai_link msm8952_tasha_dai_links[
 ARRAY_SIZE(msm8952_common_fe_dai) +
 ARRAY_SIZE(msm8952_tasha_fe_dai) +
-ARRAY_SIZE(msm8952_tdm_fe_dai) +
 ARRAY_SIZE(msm8952_common_be_dai) +
 ARRAY_SIZE(msm8952_tasha_be_dai) +
 ARRAY_SIZE(msm8952_hdmi_dba_dai_link) +
@@ -2074,7 +2007,7 @@ struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 {
 	struct snd_soc_card *card = &snd_soc_card_msm_card;
 	struct snd_soc_dai_link *msm8952_dai_links = NULL;
-	int num_links, ret, len1, len2, len3, len4 = 0, len5 = 0;
+	int num_links, ret, len1, len2, len3, len4 = 0;
 	bool albus_hw = false;
 	enum codec_variant codec_ver = 0;
 	const char *tasha_lite[NUM_OF_TASHA_LITE_DEVICE] = {
@@ -2093,9 +2026,7 @@ struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 	if (!strcmp(card->name, "msm8952-tomtom-snd-card")) {
 		len1 = ARRAY_SIZE(msm8952_common_fe_dai);
 		len2 = len1 + ARRAY_SIZE(msm8952_tomtom_fe_dai);
-		len3 = len2 + ARRAY_SIZE(msm8952_tdm_fe_dai);
-		len4 = len3 + ARRAY_SIZE(msm8952_common_be_dai);
-		len5 = len4 + ARRAY_SIZE(msm8952_tomtom_be_dai);
+		len3 = len2 + ARRAY_SIZE(msm8952_common_be_dai);
 		snd_soc_card_msm[TOMTOM_CODEC].name = card->name;
 		card = &snd_soc_card_msm[TOMTOM_CODEC];
 		num_links = ARRAY_SIZE(msm8952_tomtom_dai_links);
@@ -2104,10 +2035,8 @@ struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 		memcpy(msm8952_tomtom_dai_links + len1,
 			msm8952_tomtom_fe_dai, sizeof(msm8952_tomtom_fe_dai));
 		memcpy(msm8952_tomtom_dai_links + len2,
-			msm8952_tdm_fe_dai, sizeof(msm8952_tdm_fe_dai));
-		memcpy(msm8952_tomtom_dai_links + len3,
 			msm8952_common_be_dai, sizeof(msm8952_common_be_dai));
-		memcpy(msm8952_tomtom_dai_links + len4,
+		memcpy(msm8952_tomtom_dai_links + len3,
 			msm8952_tomtom_be_dai, sizeof(msm8952_tomtom_be_dai));
 		msm8952_dai_links = msm8952_tomtom_dai_links;
 	} else if (strnstr(card->name, "tasha", strlen(card->name))) {
@@ -2124,9 +2053,7 @@ struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 
 		len1 = ARRAY_SIZE(msm8952_common_fe_dai);
 		len2 = len1 + ARRAY_SIZE(msm8952_tasha_fe_dai);
-		len3 = len2 + ARRAY_SIZE(msm8952_tdm_fe_dai);
-		len4 = len3 + ARRAY_SIZE(msm8952_common_be_dai);
-		len5 = len4 + ARRAY_SIZE(msm8952_tasha_be_dai);
+		len3 = len2 + ARRAY_SIZE(msm8952_common_be_dai);
 		snd_soc_card_msm[TASHA_CODEC].name = card->name;
 		card = &snd_soc_card_msm[TASHA_CODEC];
 		num_links = ARRAY_SIZE(msm8952_tasha_dai_links);
@@ -2135,12 +2062,11 @@ struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 		memcpy(msm8952_tasha_dai_links + len1,
 			msm8952_tasha_fe_dai, sizeof(msm8952_tasha_fe_dai));
 		memcpy(msm8952_tasha_dai_links + len2,
-			msm8952_tdm_fe_dai, sizeof(msm8952_tdm_fe_dai));
-		memcpy(msm8952_tasha_dai_links + len3,
 			msm8952_common_be_dai, sizeof(msm8952_common_be_dai));
-		memcpy(msm8952_tasha_dai_links + len4,
+		memcpy(msm8952_tasha_dai_links + len3,
 			msm8952_tasha_be_dai, sizeof(msm8952_tasha_be_dai));
 		msm8952_dai_links = msm8952_tasha_dai_links;
+		len4 = len3 + ARRAY_SIZE(msm8952_tasha_be_dai);
 	}
 #ifdef CONFIG_SND_SOC_MARLEY
 	else if (!strncmp(card->name, "msm8952-marley-card", 19) ||
@@ -2180,18 +2106,26 @@ struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 			memcpy(msm8952_marley_dai_links + len_2a,
 				msm8952_marley_l35_dai_link,
 				sizeof(msm8952_marley_l35_dai_link));
-			memcpy(msm8952_marley_dai_links + len3,
-				msm8952_marley_albus_mods_be_dai,
-				sizeof(msm8952_marley_albus_mods_be_dai));
-			len4 = len3 + ARRAY_SIZE(msm8952_marley_mods_be_dai);
+			#ifdef CONFIG_SND_SOC_MODS_CODEC_SHIM
+				memcpy(msm8952_marley_dai_links + len3,
+					msm8952_marley_albus_mods_be_dai,
+					sizeof(msm8952_marley_albus_mods_be_dai));
+				len4 = len3 + ARRAY_SIZE(msm8952_marley_mods_be_dai);
+			#else
+				len4 = len3;
+			#endif
 		} else {
 			memcpy(msm8952_marley_dai_links + len_2a,
 				msm8952_marley_l34_dai_link,
 				sizeof(msm8952_marley_l34_dai_link));
-			memcpy(msm8952_marley_dai_links + len3,
-				msm8952_marley_mods_be_dai,
-				sizeof(msm8952_marley_mods_be_dai));
-			len4 = len3 + ARRAY_SIZE(msm8952_marley_mods_be_dai);
+			#ifdef CONFIG_SND_SOC_MODS_CODEC_SHIM
+				memcpy(msm8952_marley_dai_links + len3,
+					msm8952_marley_mods_be_dai,
+					sizeof(msm8952_marley_mods_be_dai));
+				len4 = len3 + ARRAY_SIZE(msm8952_marley_mods_be_dai);
+			#else
+				len4 = len3;
+			#endif
 		}
 	}
 #endif
@@ -2210,39 +2144,50 @@ struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 				__func__);
 			ret = of_property_read_string(dev->of_node,
 				"qcom,dba_cpu_dai_name", &dba_cpu_dai_name);
-			if (ret == 0)
-				msm8952_hdmi_dba_dai_link[0].cpu_dai_name =
-					dba_cpu_dai_name;
-			memcpy(msm8952_dai_links + len5, msm8952_hdmi_dba_dai_link,
-				sizeof(msm8952_hdmi_dba_dai_link));
-			len5 += ARRAY_SIZE(msm8952_hdmi_dba_dai_link);
+			if (of_property_read_bool(dev->of_node, "qcom,ali-audio")) {
+				if (ret == 0)
+					msm8952_ali_hdmi_dba_dai_link[0].cpu_dai_name =
+						dba_cpu_dai_name;
+				memcpy(msm8952_dai_links + len4,
+						msm8952_ali_hdmi_dba_dai_link,
+						sizeof(msm8952_ali_hdmi_dba_dai_link));
+				len4 += ARRAY_SIZE(msm8952_ali_hdmi_dba_dai_link);
+			} else { /* albus */
+				if (ret == 0)
+					msm8952_albus_hdmi_dba_dai_link[0].cpu_dai_name =
+						dba_cpu_dai_name;
+				memcpy(msm8952_dai_links + len4,
+						msm8952_albus_hdmi_dba_dai_link,
+						sizeof(msm8952_albus_hdmi_dba_dai_link));
+				len4 += ARRAY_SIZE(msm8952_albus_hdmi_dba_dai_link);
+			}
 		}
 	} else {
 		if (!albus_hw) {
 			dev_dbg(dev, "%s(): No hdmi dba. Add quin dai\n",
 				__func__);
-			memcpy(msm8952_dai_links + len5, msm8952_quin_dai_link,
+			memcpy(msm8952_dai_links + len4, msm8952_quin_dai_link,
 				sizeof(msm8952_quin_dai_link));
-			len5 += ARRAY_SIZE(msm8952_quin_dai_link);
+			len4 += ARRAY_SIZE(msm8952_quin_dai_link);
 		}
 	}
 	if (of_property_read_bool(dev->of_node, "qcom,tdm-audio-intf")) {
 		dev_dbg(dev, "%s(): TDM support present\n",
 				__func__);
-		memcpy(msm8952_dai_links + len5, msm8952_tdm_be_dai_link,
+		memcpy(msm8952_dai_links + len4, msm8952_tdm_be_dai_link,
 			sizeof(msm8952_tdm_be_dai_link));
-		len5 += ARRAY_SIZE(msm8952_tdm_be_dai_link);
-	}
+		len4 += ARRAY_SIZE(msm8952_tdm_be_dai_link);
+	}	
 	if (of_property_read_bool(dev->of_node, "qcom,afe-rxtx-lb")) {
 		dev_dbg(dev, "%s(): AFE RX to TX loopback supported\n",
 				__func__);
-		memcpy(msm8952_dai_links + len5,
+		memcpy(msm8952_dai_links + len4,
 		       msm8952_afe_rxtx_lb_be_dai_link,
 		       sizeof(msm8952_afe_rxtx_lb_be_dai_link));
-		len5 += ARRAY_SIZE(msm8952_afe_rxtx_lb_be_dai_link);
+		len4 += ARRAY_SIZE(msm8952_afe_rxtx_lb_be_dai_link);
 	}
 	card->dai_link = msm8952_dai_links;
-	card->num_links = len5;
+	card->num_links = len4;
 	card->dev = dev;
 
 	return card;

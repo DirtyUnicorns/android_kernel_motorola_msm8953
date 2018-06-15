@@ -478,8 +478,7 @@ struct ubi_debug_info {
  * @pq_head: protection queue head
  * @wl_lock: protects the @used, @free, @pq, @pq_head, @lookuptbl, @move_from,
  *	     @move_to, @move_to_put @erase_pending, @wl_scheduled, @works,
- *	     @erroneous, @erroneous_peb_count, @fm_work_scheduled, @fm_pool,
- *	     and @fm_wl_pool fields
+ *	     @erroneous, @erroneous_peb_count, and @fm_work_scheduled fields
  * @move_mutex: serializes eraseblock moves
  * @work_sem: used to wait for all the scheduled works to finish and prevent
  * new works from being submitted
@@ -873,7 +872,7 @@ ssize_t ubi_wl_scrub_all(struct ubi_device *ubi,
 void ubi_wl_update_peb_sqnum(struct ubi_device *ubi, int pnum,
 				struct ubi_vid_hdr *vid_hdr);
 unsigned long long ubi_wl_scrub_get_min_sqnum(struct ubi_device *ubi);
-int ubi_wl_erase_peb(struct ubi_device *ubi, int pnum);
+int ubi_wl_re_erase_peb(struct ubi_device *ubi, int pnum);
 
 /* io.c */
 int ubi_io_read(const struct ubi_device *ubi, void *buf, int pnum, int offset,

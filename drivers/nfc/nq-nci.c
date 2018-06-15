@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -109,6 +109,14 @@ static void nqx_disable_irq(struct nqx_dev *nqx_dev)
 	spin_unlock_irqrestore(&nqx_dev->irq_enabled_lock, flags);
 }
 
+/**
+ * nqx_enable_irq()
+ *
+ * Check if interrupt is enabled or not
+ * and enable interrupt
+ *
+ * Return: void
+ */
 static void nqx_enable_irq(struct nqx_dev *nqx_dev)
 {
 	unsigned long flags;
@@ -263,7 +271,7 @@ static ssize_t nfc_write(struct file *filp, const char __user *buf,
 
 	ret = i2c_master_send(nqx_dev->client, tmp, count);
 	if (ret != count) {
-		dev_err(&nqx_dev->client->dev,
+		dev_dbg(&nqx_dev->client->dev,
 		"%s: failed to write %d\n", __func__, ret);
 		ret = -EIO;
 		goto out_free;
@@ -401,10 +409,10 @@ int nfc_ioctl_power_states(struct file *filp, unsigned long arg)
 		/* hardware dependent delay */
 		msleep(100);
 	} else if (arg == 1) {
+		nqx_enable_irq(nqx_dev);
 		dev_dbg(&nqx_dev->client->dev,
 			"gpio_set_value enable: %s: info: %p\n",
 			__func__, nqx_dev);
-		nqx_enable_irq(nqx_dev);
 		if (gpio_is_valid(nqx_dev->firm_gpio))
 			gpio_set_value(nqx_dev->firm_gpio, 0);
 		gpio_set_value(nqx_dev->en_gpio, 1);
@@ -1043,6 +1051,7 @@ static struct i2c_driver nqx = {
 		.owner = THIS_MODULE,
 		.name = "nq-nci",
 		.of_match_table = msm_match_table,
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 		.pm = &nfc_pm_ops,
 	},
 };

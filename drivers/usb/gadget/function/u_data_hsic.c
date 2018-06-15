@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2016, Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2014,2016-2017 Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1194,10 +1194,9 @@ int ghsic_data_setup(unsigned num_ports, enum gadget_type gtype)
 	return first_port_id;
 
 free_ports:
-	for (i = first_port_id; i < no_data_ports; i++) {
+	for (i = first_port_id; i < no_data_ports; i++)
 		ghsic_data_port_free(i);
 		no_data_ports = first_port_id;
-	}
 
 	return ret;
 }

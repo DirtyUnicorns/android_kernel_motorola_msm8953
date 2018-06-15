@@ -789,7 +789,6 @@ static bool free_pages_prepare(struct page *page, unsigned int order)
 
 	trace_mm_page_free(page, order);
 	kmemcheck_free_shadow(page, order);
-	kasan_free_pages(page, order);
 
 	if (PageAnon(page))
 		page->mapping = NULL;
@@ -979,7 +978,6 @@ static int prep_new_page(struct page *page, unsigned int order, gfp_t gfp_flags)
 	kasan_alloc_pages(page, order);
 	arch_alloc_page(page, order);
 	kernel_map_pages(page, 1 << order, 1);
-	kasan_alloc_pages(page, order);
 
 	if (gfp_flags & __GFP_ZERO)
 		prep_zero_page(page, order, gfp_flags);
@@ -1155,6 +1153,9 @@ static void change_pageblock_range(struct page *pageblock_page,
  * as fragmentation caused by those allocations polluting movable pageblocks
  * is worse than movable allocations stealing from unmovable and reclaimable
  * pageblocks.
+ *
+ * If we claim more than half of the pageblock, change pageblock's migratetype
+ * as well.
  */
 static bool can_steal_fallback(unsigned int order, int start_mt)
 {

@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -176,6 +176,7 @@ struct bcl_context {
 	struct qpnp_adc_tm_btm_param btm_vph_adc_param;
 	/* Low temp min freq limit requested by thermal */
 	uint32_t thermal_freq_limit;
+	struct work_struct charger_mitig_work;
 
 	/* BCL Peripheral monitor parameters */
 	struct bcl_threshold ibat_high_thresh;
@@ -186,6 +187,7 @@ struct bcl_context {
 	struct workqueue_struct *bcl_hotplug_wq;
 	struct device_clnt_data *hotplug_handle;
 	struct device_clnt_data *cpufreq_handle[NR_CPUS];
+	bool bcl_charger_mitigate_enabe;
 };
 
 enum bcl_threshold_state {
@@ -194,15 +196,23 @@ enum bcl_threshold_state {
 	BCL_THRESHOLD_DISABLED,
 };
 
+enum bcl_charger_state {
+	BCL_CHARGER_ACTIVE = 0,
+	BCL_CHARGER_INACTIVE,
+	BCL_CHARGER_DISABLED,
+};
+
 static struct bcl_context *gbcl;
 static enum bcl_threshold_state bcl_vph_state = BCL_THRESHOLD_DISABLED,
 		bcl_ibat_state = BCL_THRESHOLD_DISABLED,
 		bcl_soc_state = BCL_THRESHOLD_DISABLED;
+static enum bcl_charger_state bcl_charger_state = BCL_CHARGER_DISABLED;
 static DEFINE_MUTEX(bcl_notify_mutex);
 static uint32_t bcl_hotplug_request, bcl_hotplug_mask, bcl_soc_hotplug_mask;
 static uint32_t bcl_frequency_mask;
 static struct work_struct bcl_hotplug_work;
 static DEFINE_MUTEX(bcl_hotplug_mutex);
+static DEFINE_MUTEX(bcl_cpufreq_mutex);
 static bool bcl_hotplug_enabled;
 static uint32_t battery_soc_val = 100;
 static uint32_t soc_low_threshold;
@@ -218,7 +228,9 @@ static void bcl_handle_hotplug(struct work_struct *work)
 	mutex_lock(&bcl_hotplug_mutex);
 
 	if  (bcl_soc_state == BCL_LOW_THRESHOLD
-		|| bcl_vph_state == BCL_LOW_THRESHOLD)
+		&& bcl_charger_state != BCL_CHARGER_ACTIVE)
+		bcl_hotplug_request = bcl_soc_hotplug_mask;
+	else if (bcl_vph_state == BCL_LOW_THRESHOLD)
 		bcl_hotplug_request = bcl_soc_hotplug_mask;
 	else if (bcl_ibat_state == BCL_HIGH_THRESHOLD)
 		bcl_hotplug_request = bcl_hotplug_mask;
@@ -252,12 +264,14 @@ static void update_cpu_freq(void)
 	union device_request cpufreq_req;
 
 	trace_bcl_sw_mitigation_event("Start Frequency Mitigate");
+	mutex_lock(&bcl_cpufreq_mutex);
 	cpufreq_req.freq.max_freq = UINT_MAX;
 	cpufreq_req.freq.min_freq = CPUFREQ_MIN_NO_MITIGATION;
 
 	if (bcl_vph_state == BCL_LOW_THRESHOLD
 		|| bcl_ibat_state == BCL_HIGH_THRESHOLD
-		|| bcl_soc_state == BCL_LOW_THRESHOLD) {
+		|| (bcl_soc_state == BCL_LOW_THRESHOLD
+		&& bcl_charger_state !=  BCL_CHARGER_ACTIVE)) {
 		cpufreq_req.freq.max_freq = (gbcl->bcl_monitor_type
 			== BCL_IBAT_MONITOR_TYPE) ? gbcl->btm_freq_max
 			: gbcl->bcl_p_freq_max;
@@ -276,7 +290,40 @@ static void update_cpu_freq(void)
 			pr_err("Error updating freq for CPU%d. ret:%d\n",
 				cpu, ret);
 	}
+	mutex_unlock(&bcl_cpufreq_mutex);
 	trace_bcl_sw_mitigation_event("End Frequency Mitigation");
+}
+
+static void charger_mitigate(struct work_struct *work)
+{
+	static struct power_supply *batt_psy;
+	union power_supply_propval ret = {0,};
+	int charger_rate = POWER_SUPPLY_CHARGE_RATE_NONE;
+	enum bcl_charger_state prev_bcl_charger_state;
+
+	if (!batt_psy)
+		batt_psy = power_supply_get_by_name("battery");
+	if (batt_psy) {
+		charger_rate = power_supply_get_property(batt_psy,
+				POWER_SUPPLY_PROP_CHARGE_RATE, &ret);
+		charger_rate = ret.intval;
+	}
+	prev_bcl_charger_state = bcl_charger_state;
+	bcl_charger_state = (charger_rate == POWER_SUPPLY_CHARGE_RATE_TURBO) ?
+				BCL_CHARGER_ACTIVE : BCL_CHARGER_INACTIVE;
+	pr_debug("charger_rate:%d. prev_state:%d. now_state:%d\n",
+		charger_rate, prev_bcl_charger_state, bcl_charger_state);
+	if (bcl_charger_state == prev_bcl_charger_state)
+		return;
+
+	if (bcl_hotplug_enabled)
+		queue_work(gbcl->bcl_hotplug_wq, &bcl_hotplug_work);
+	update_cpu_freq();
+}
+
+static void get_and_evaluate_charger_active(void)
+{
+	schedule_work(&gbcl->charger_mitig_work);
 }
 
 static void power_supply_callback(struct power_supply *psy)
@@ -290,6 +337,9 @@ static void power_supply_callback(struct power_supply *psy)
 		pr_debug("BCL is not enabled\n");
 		return;
 	}
+
+	if (gbcl->bcl_charger_mitigate_enabe)
+		get_and_evaluate_charger_active();
 
 	if (!bms_psy)
 		bms_psy = power_supply_get_by_name("bms");
@@ -686,6 +736,7 @@ static void bcl_periph_mode_set(enum bcl_device_mode mode)
 		}
 		gbcl->btm_mode = BCL_MONITOR_DISABLED;
 		bcl_soc_state = BCL_THRESHOLD_DISABLED;
+		bcl_charger_state = BCL_CHARGER_DISABLED;
 		bcl_vph_notify(BCL_HIGH_THRESHOLD);
 		bcl_ibat_notify(BCL_LOW_THRESHOLD);
 		bcl_handle_hotplug(NULL);
@@ -1697,6 +1748,12 @@ static int bcl_probe(struct platform_device *pdev)
 	else
 		bcl->bcl_no_bms = false;
 
+	if (of_property_read_bool(pdev->dev.of_node,
+		"qcom,bcl-charger-mitigate-enable"))
+		bcl->bcl_charger_mitigate_enabe = true;
+	else
+		bcl->bcl_charger_mitigate_enabe = false;
+
 	bcl_frequency_mask = get_mask_from_core_handle(pdev,
 					 "qcom,bcl-freq-control-list");
 	bcl_hotplug_mask = get_mask_from_core_handle(pdev,
@@ -1722,6 +1779,7 @@ static int bcl_probe(struct platform_device *pdev)
 		pr_err("Cannot create bcl sysfs\n");
 		return ret;
 	}
+	INIT_WORK(&bcl->charger_mitig_work, charger_mitigate);
 	bcl_psy.name = bcl_psy_name;
 	bcl_psy.type = POWER_SUPPLY_TYPE_BMS;
 	bcl_psy.get_property     = bcl_battery_get_property;

@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -30,6 +30,9 @@
 #include <linux/qdsp6v2/apr_tal.h>
 #ifdef CONFIG_SND_SOC_OPALUM
 #include <sound/ospl2xx.h>
+#endif
+#ifdef CONFIG_SND_SOC_TAS2560
+#include <sound/tas2560_algo.h>
 #endif
 
 #define WAKELOCK_TIMEOUT	5000
@@ -142,6 +145,17 @@ int ospl2xx_afe_set_callback(
 	int32_t (*ospl2xx_callback_func)(struct apr_client_data *data))
 {
 	ospl2xx_callback = ospl2xx_callback_func;
+	return 0;
+}
+#endif
+
+#ifdef CONFIG_SND_SOC_TAS2560
+int32_t (*tas2560_algo_callback)(struct apr_client_data *data);
+
+int tas2560_algo_afe_set_callback(
+	int32_t (*tas2560_algo_callback_func)(struct apr_client_data *data))
+{
+	tas2560_algo_callback = tas2560_algo_callback_func;
 	return 0;
 }
 #endif
@@ -338,6 +352,16 @@ static int32_t afe_callback(struct apr_client_data *data, void *priv)
 			atomic_set(&this_afe.state, 0);
 		} else {
 #endif
+#ifdef CONFIG_SND_SOC_TAS2560
+		int32_t *payload32 = data->payload;
+
+		if ((payload32[1] == AFE_TAS2560_ALGO_MODULE_RX) ||
+		     (payload32[1] == AFE_TAS2560_ALGO_MODULE_TX)) {
+			if (tas2560_algo_callback != NULL)
+				tas2560_algo_callback(data);
+			atomic_set(&this_afe.state, 0);
+		} else {
+#endif
 		if (rtac_make_afe_callback(data->payload, data->payload_size))
 			return 0;
 
@@ -349,7 +373,7 @@ static int32_t afe_callback(struct apr_client_data *data, void *priv)
 		}
 		if (sp_make_afe_callback(data->payload, data->payload_size))
 			return -EINVAL;
-#ifdef CONFIG_SND_SOC_OPALUM
+#if defined(CONFIG_SND_SOC_OPALUM) || defined(CONFIG_SND_SOC_TAS2560)
 		}
 #endif
 		wake_up(&this_afe.wait[data->token]);
@@ -728,6 +752,15 @@ int ospl2xx_afe_apr_send_pkt(void *data, int index)
 }
 #endif
 
+#ifdef CONFIG_SND_SOC_TAS2560
+int tas2560_algo_afe_apr_send_pkt(void *data, int index)
+{
+	int ret = 0;
+
+	ret = afe_apr_send_pkt(data, &this_afe.wait[index]);
+	return ret;
+}
+#endif
 static int afe_send_cal_block(u16 port_id, struct cal_block_data *cal_block)
 {
 	int						result = 0;
@@ -2511,7 +2544,7 @@ fail_cmd:
 }
 
 int afe_tdm_port_start(u16 port_id, struct afe_tdm_port_config *tdm_port,
-		u32 rate, u16 num_groups)
+		u32 rate)
 {
 	struct afe_audioif_config_command config;
 	int ret = 0;
@@ -2544,10 +2577,9 @@ int afe_tdm_port_start(u16 port_id, struct afe_tdm_port_config *tdm_port,
 		return ret;
 	}
 
-	/* Also send the topology id here if multiple ports are present */
+	/* Also send the topology id here: */
 	port_index = afe_get_port_index(port_id);
-	if (!(this_afe.afe_cal_mode[port_index] == AFE_CAL_MODE_NONE) &&
-		num_groups > 1) {
+	if (!(this_afe.afe_cal_mode[port_index] == AFE_CAL_MODE_NONE)) {
 		/* One time call: only for first time */
 		afe_send_custom_topology();
 		afe_send_port_topology_id(port_id);
@@ -2609,14 +2641,11 @@ int afe_tdm_port_start(u16 port_id, struct afe_tdm_port_config *tdm_port,
 		ret = -EINVAL;
 		goto fail_cmd;
 	}
-	/* slot mapping is not need if there is only one group */
-	if (num_groups > 1) {
-		ret = afe_send_slot_mapping_cfg(&tdm_port->slot_mapping,
-						port_id);
-		if (ret < 0) {
-			pr_err("%s: afe send failed %d\n", __func__, ret);
-			goto fail_cmd;
-		}
+
+	ret = afe_send_slot_mapping_cfg(&tdm_port->slot_mapping, port_id);
+	if (ret < 0) {
+		pr_err("%s: afe send failed %d\n", __func__, ret);
+		goto fail_cmd;
 	}
 
 	if (tdm_port->custom_tdm_header.header_type) {
@@ -4350,7 +4379,7 @@ static ssize_t afe_debug_write(struct file *filp,
 
 	lbuf[cnt] = '\0';
 
-	if (!strncmp(lb_str, "afe_loopback", 12)) {
+	if (!strcmp(lb_str, "afe_loopback")) {
 		rc = afe_get_parameters(lbuf, param, 3);
 		if (!rc) {
 			pr_info("%s: %lu %lu %lu\n", lb_str, param[0], param[1],
@@ -4379,7 +4408,7 @@ static ssize_t afe_debug_write(struct file *filp,
 			rc = -EINVAL;
 		}
 
-	} else if (!strncmp(lb_str, "afe_loopback_gain", 17)) {
+	} else if (!strcmp(lb_str, "afe_loopback_gain")) {
 		rc = afe_get_parameters(lbuf, param, 2);
 		if (!rc) {
 			pr_info("%s: %s %lu %lu\n",
@@ -6313,6 +6342,7 @@ static int afe_map_cal_data(int32_t cal_type,
 	}
 
 
+	mutex_lock(&this_afe.afe_cmd_lock);
 	atomic_set(&this_afe.mem_map_cal_index, cal_index);
 	ret = afe_cmd_memory_map(cal_block->cal_data.paddr,
 			cal_block->map_data.map_size);
@@ -6325,10 +6355,12 @@ static int afe_map_cal_data(int32_t cal_type,
 			__func__,
 			&cal_block->cal_data.paddr,
 			cal_block->map_data.map_size);
+		mutex_unlock(&this_afe.afe_cmd_lock);
 		goto done;
 	}
 	cal_block->map_data.q6map_handle = atomic_read(&this_afe.
 		mem_map_cal_handles[cal_index]);
+	mutex_unlock(&this_afe.afe_cmd_lock);
 done:
 	return ret;
 }

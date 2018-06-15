@@ -1,4 +1,4 @@
-/* Copyright (c) 2011, 2013-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011, 2013-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -542,10 +542,9 @@ int ghsic_ctrl_setup(unsigned int num_ports, enum gadget_type gtype)
 	return first_port_id;
 
 free_ports:
-	for (i = first_port_id; i < no_ctrl_ports; i++) {
+	for (i = first_port_id; i < no_ctrl_ports; i++)
 		ghsic_ctrl_port_free(i);
 		no_ctrl_ports = first_port_id;
-	}
 	return ret;
 }
 

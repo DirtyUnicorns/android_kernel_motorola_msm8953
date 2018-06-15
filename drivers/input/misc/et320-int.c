@@ -28,9 +28,6 @@
 #include <linux/of_irq.h>
 #endif
 
-#include <linux/fb.h>
-#include <linux/notifier.h>
-
 #include <linux/gpio.h>
 #include <linux/mutex.h>
 #include <linux/list.h>
@@ -209,7 +206,7 @@ void interrupt_timer_routine(unsigned long _data)
 {
 	struct interrupt_desc *bdata = (struct interrupt_desc *)_data;
 
-	pr_debug("FPS interrupt count = %d", bdata->int_count);
+	DEBUG_PRINT("FPS interrupt count = %d", bdata->int_count);
 	if (bdata->int_count >= bdata->detect_threshold) {
 		bdata->finger_on = 1;
 		DEBUG_PRINT("FPS triggered !!!!!!!\n");
@@ -227,20 +224,20 @@ static irqreturn_t fp_eint_func(int irq, void *dev_id)
 		mod_timer(&fps_ints.timer, jiffies + msecs_to_jiffies(fps_ints.detect_period));
 	fps_ints.int_count++;
 	/* printk_ratelimited(KERN_WARNING "-----------   zq fp fp_eint_func  ,fps_ints.int_count=%d",fps_ints.int_count);*/
-	wake_lock_timeout(&et320_wake_lock, msecs_to_jiffies(1000));
+	wake_lock_timeout(&et320_wake_lock, msecs_to_jiffies(1500));
 	return IRQ_HANDLED;
 }
 
 static irqreturn_t fp_eint_func_ll(int irq , void *dev_id)
 {
-	DEBUG_PRINT("[egis]fp_eint_func_ll\n");
+	pr_debug("etspi: fp_eint_func_ll\n");
 	fps_ints.finger_on = 1;
 	/* fps_ints.int_count = 0; */
 	disable_irq_nosync(gpio_irq);
 	fps_ints.drdy_irq_flag = DRDY_IRQ_DISABLE;
 	wake_up_interruptible(&interrupt_waitq);
 	/* printk_ratelimited(KERN_WARNING "-----------   zq fp fp_eint_func  ,fps_ints.int_count=%d",fps_ints.int_count);*/
-	wake_lock_timeout(&et320_wake_lock, msecs_to_jiffies(1000));
+	wake_lock_timeout(&et320_wake_lock, msecs_to_jiffies(1500));
 	return IRQ_RETVAL(IRQ_HANDLED);
 }
 
@@ -267,58 +264,68 @@ int Interrupt_Init(struct etspi_data *etspi, int int_mode, int detect_period, in
 
 	int err = 0;
 	int status = 0;
+	static unsigned long jt;
 
-	DEBUG_PRINT("%s request_irq_done = %d gpio_irq = %d  pin = %d  \n", __func__, request_irq_done, gpio_irq, etspi->irqPin);
+	pr_debug("etspi: --  %s mode = %d period = %d threshold = %d\n",\
+		__func__, int_mode, detect_period, detect_threshold);
+	pr_debug("etspi: --  %s request_irq_done = %d gpio_irq = %d  pin = %d\n",\
+		__func__, request_irq_done, gpio_irq, etspi->irqPin);
+
+
 	fps_ints.detect_period = detect_period;
 	fps_ints.detect_threshold = detect_threshold;
 	fps_ints.int_count = 0;
 	fps_ints.finger_on = 0;
-	fps_ints.int_mode = int_mode;
 
 
 	if (request_irq_done == 0)	{
 		gpio_irq = gpio_to_irq(etspi->irqPin);
 		if (gpio_irq < 0) {
-			DEBUG_PRINT("%s gpio_to_irq failed\n", __func__);
+			DEBUG_PRINT("etspi: %s gpio_to_irq failed\n", __func__);
 			status = gpio_irq;
 			goto done;
 		}
 
-		DEBUG_PRINT("[Interrupt_Init] flag current: %d disable: %d enable: %d\n",
+		DEBUG_PRINT("etspi:Interrupt_Init flag current: %d disable:\
+			%d enable: %d\n",
 		fps_ints.drdy_irq_flag, DRDY_IRQ_DISABLE, DRDY_IRQ_ENABLE);
 		/* t_mode = int_mode; */
 		if (int_mode == EDGE_TRIGGER_RISING) {
-			DEBUG_PRINT("%s EDGE_TRIGGER_RISING\n", __func__);
-			err = request_irq(gpio_irq, fp_eint_func, IRQ_TYPE_EDGE_RISING, "fp_detect-eint", etspi);
+			DEBUG_PRINT("etspi:%s EDGE_TRIGGER_RISING\n", __func__);
+			err = request_irq(gpio_irq, fp_eint_func, IRQ_TYPE_EDGE_RISING,\
+				"fp_detect-eint", etspi);
 			if (err) {
-				pr_err("request_irq failed==========%s,%d\n", __func__, __LINE__);
+				pr_err("etspi:request_irq failed==========%s,%d\n", __func__, __LINE__);
 			}
 		} else if (int_mode == EDGE_TRIGGER_FALLING) {
-			DEBUG_PRINT("%s EDGE_TRIGGER_FALLING\n", __func__);
-			err = request_irq(gpio_irq, fp_eint_func, IRQ_TYPE_EDGE_FALLING, "fp_detect-eint", etspi);
+			DEBUG_PRINT("etspi:%s EDGE_TRIGGER_FALLING\n", __func__);
+			err = request_irq(gpio_irq, fp_eint_func, IRQ_TYPE_EDGE_FALLING,\
+				"fp_detect-eint", etspi);
 			if (err) {
-				pr_err("request_irq failed==========%s,%d\n", __func__, __LINE__);
+				pr_err("etspi:request_irq failed==========%s,%d\n",\
+					__func__, __LINE__);
 			}
 		} else if (int_mode == LEVEL_TRIGGER_LOW) {
-			DEBUG_PRINT("%s LEVEL_TRIGGER_LOW\n", __func__);
-			err = request_irq(gpio_irq, fp_eint_func_ll, IRQ_TYPE_LEVEL_LOW, "fp_detect-eint", etspi);
+			DEBUG_PRINT("etspi:%s LEVEL_TRIGGER_LOW\n", __func__);
+			err = request_irq(gpio_irq, fp_eint_func_ll, IRQ_TYPE_LEVEL_LOW,\
+				"fp_detect-eint", etspi);
 			if (err) {
-				pr_err("request_irq failed==========%s,%d\n", __func__, __LINE__);
+				pr_err("etspi:request_irq failed==========%s,%d\n", __func__, __LINE__);
 			}
 		} else if (int_mode == LEVEL_TRIGGER_HIGH) {
-			DEBUG_PRINT("%s LEVEL_TRIGGER_HIGH\n", __func__);
-			err = request_irq(gpio_irq, fp_eint_func_ll, IRQ_TYPE_LEVEL_HIGH, "fp_detect-eint", etspi);
+			DEBUG_PRINT("etspi:%s LEVEL_TRIGGER_HIGH\n", __func__);
+			err = request_irq(gpio_irq, fp_eint_func_ll, IRQ_TYPE_LEVEL_HIGH,\
+				"fp_detect-eint", etspi);
 			if (err) {
-				pr_err("request_irq failed==========%s,%d\n", __func__, __LINE__);
+				pr_err("etspi:request_irq failed==========%s,%d\n", __func__, __LINE__);
 			}
 		}
-		DEBUG_PRINT("[Interrupt_Init]:gpio_to_irq return: %d\n", gpio_irq);
-		DEBUG_PRINT("[Interrupt_Init]:request_irq return: %d\n", err);
+		DEBUG_PRINT("etspi:Interrupt_Init:gpio_to_irq return: %d\n", gpio_irq);
+		DEBUG_PRINT("etspi:Interrupt_Init:request_irq return: %d\n", err);
 		/* disable_irq_nosync(gpio_irq); */
 		fps_ints.drdy_irq_flag = DRDY_IRQ_ENABLE;
 		enable_irq_wake(gpio_irq);
 		request_irq_done = 1;
-		DEBUG_PRINT("%s mode = %d period = %d threshold = %d\n", __func__, int_mode, detect_period, detect_threshold);
 	}
 
 
@@ -326,6 +333,10 @@ int Interrupt_Init(struct etspi_data *etspi, int int_mode, int detect_period, in
 		fps_ints.drdy_irq_flag = DRDY_IRQ_ENABLE;
 		enable_irq_wake(gpio_irq);
 		enable_irq(gpio_irq);
+		if (printk_timed_ratelimit(&jt, 500))
+			DEBUG_PRINT("etspi: Interrupt_Init: %s irq/done:%d %d mode:%d\
+			period:%d \threshold:%d \n", __func__, gpio_irq, request_irq_done,\
+			int_mode, detect_period, detect_threshold);
 	}
 done:
 	return 0;
@@ -344,11 +355,11 @@ done:
 
 int Interrupt_Free(struct etspi_data *etspi)
 {
-	DEBUG_PRINT("%s\n", __func__);
+	pr_debug("etspi: %s\n", __func__);
 	fps_ints.finger_on = 0;
 
 	if (fps_ints.drdy_irq_flag == DRDY_IRQ_ENABLE) {
-		DEBUG_PRINT("%s (DISABLE IRQ)\n", __func__);
+		DEBUG_PRINT("etspi: %s (DISABLE IRQ)\n", __func__);
 		disable_irq_nosync(gpio_irq);
 		/* disable_irq(gpio_irq); */
 		del_timer_sync(&fps_ints.timer);
@@ -392,7 +403,7 @@ struct poll_table_struct *wait)
 
 void fps_interrupt_abort(void)
 {
-	DEBUG_PRINT("%s\n", __func__);
+	DEBUG_PRINT("etspi:%s\n", __func__);
 	fps_ints.finger_on = 0;
 	wake_up_interruptible(&interrupt_waitq);
 }
@@ -401,7 +412,7 @@ void fps_interrupt_abort(void)
 
 static void etspi_reset(struct etspi_data *etspi)
 {
-	DEBUG_PRINT("%s\n", __func__);
+	DEBUG_PRINT("etspi:%s\n", __func__);
 	gpio_set_value(etspi->rstPin, 0);
 	msleep(30);
 	gpio_set_value(etspi->rstPin, 1);
@@ -428,22 +439,9 @@ static ssize_t etspi_write(struct file *filp,
 static ssize_t etspi_enable_set(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
-	struct etspi_data *etspi = dev_get_drvdata(dev);
 	int state = (*buf == '1') ? 1 : 0;
 	FPS_notify(0xbeef, state);
-	DEBUG_PRINT("%s state = %d flag= %d lcd_off= %d\n", __func__, state, fps_ints.drdy_irq_flag, etspi->lcd_off);
-	if (!request_irq_done)
-		return 1;
-	/* FPS is activte but int is disabled, enable int */
-	if (state && fps_ints.drdy_irq_flag == DRDY_IRQ_DISABLE) {
-		Interrupt_Init(etspi, fps_ints.int_mode, fps_ints.detect_period, fps_ints.detect_threshold);
-		DEBUG_PRINT("[%s] re-enable int\n", __func__);
-	}
-	/* FPS is not activte but int is enabled and lcd is off, disable int */
-	if (!state && etspi->lcd_off && fps_ints.drdy_irq_flag) {
-		Interrupt_Free(etspi);
-		DEBUG_PRINT("[%s] disable int\n", __func__);
-	}
+	DEBUG_PRINT("%s  state = %d\n", __func__, state);
 	return 1;
 }
 static DEVICE_ATTR(etspi_enable, S_IWUSR | S_IWGRP, NULL, etspi_enable_set);
@@ -464,7 +462,7 @@ static long etspi_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	memset(&data, 0, sizeof(data));
 
-	pr_debug("%s %u\n", __func__, cmd);
+	pr_debug("etspi: %s\n", __func__);
 
 	etspi = filp->private_data;
 
@@ -474,24 +472,23 @@ static long etspi_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			retval = -EFAULT;
 			goto done;
 		}
-
-		pr_debug("fp_ioctl >>> fp Trigger function init\n");
+		pr_debug("etspi:fp_ioctl >>> fp Trigger function init\n");
 		retval = Interrupt_Init(etspi, data.int_mode, data.detect_period, data.detect_threshold);
-		pr_debug("fp_ioctl trigger init = %x\n", retval);
+		pr_debug("etspi:fp_ioctl trigger init = %x\n", retval);
 	break;
 
 	case FP_SENSOR_RESET:
-			DEBUG_PRINT("fp_ioctl ioc->opcode == FP_SENSOR_RESET --");
-			etspi_reset(etspi);
+		DEBUG_PRINT("etspi:fp_ioctl ioc->opcode == FP_SENSOR_RESET --");
+		etspi_reset(etspi);
 		goto done;
 	case INT_TRIGGER_CLOSE:
-			pr_debug("fp_ioctl <<< fp Trigger function close\n");
-			retval = Interrupt_Free(etspi);
-			pr_debug("fp_ioctl trigger close = %x\n", retval);
+		pr_debug("etspi:fp_ioctl <<< fp Trigger function close\n");
+		retval = Interrupt_Free(etspi);
+		pr_debug("etspi:fp_ioctl trigger close = %x\n", retval);
 		goto done;
 	case INT_TRIGGER_ABORT:
-			DEBUG_PRINT("fp_ioctl <<< fp Trigger function close\n");
-			fps_interrupt_abort();
+		DEBUG_PRINT("etspi:fp_ioctl <<< fp Trigger function abort\n");
+		fps_interrupt_abort();
 		goto done;
 	default:
 	retval = -ENOTTY;
@@ -541,7 +538,7 @@ static int etspi_open(struct inode *inode, struct file *filp)
 			nonseekable_open(inode, filp);
 		}
 	} else {
-		pr_debug("%s nothing for minor %d\n"
+		pr_info("%s nothing for minor %d\n"
 			, __func__, iminor(inode));
 	}
 	mutex_unlock(&device_list_lock);
@@ -587,40 +584,6 @@ int etspi_platformInit(struct etspi_data *etspi)
 	DEBUG_PRINT("%s\n", __func__);
 
 	if (etspi != NULL) {
-
-		/* Initial Reset Pin*/
-		status = gpio_request(etspi->rstPin, "reset-gpio");
-		if (status < 0) {
-			pr_err("%s gpio_requset etspi_Reset failed\n",
-				__func__);
-			goto etspi_platformInit_rst_failed;
-		}
-		gpio_direction_output(etspi->rstPin, 1);
-		if (status < 0) {
-			pr_err("%s gpio_direction_output Reset failed\n",
-					__func__);
-			status = -EBUSY;
-			goto etspi_platformInit_rst_failed;
-		}
-		/* gpio_set_value(etspi->rstPin, 1); */
-		pr_err("et320:  reset to high\n");
-		/* initial 33V power pin */
-		status = gpio_request(etspi->vcc_33v_Pin, "33v-gpio");
-		if (status < 0) {
-			pr_err("%s gpio_requset vcc_33v_Pin failed\n",
-				__func__);
-			goto etspi_platformInit_rst_failed;
-		}
-		gpio_direction_output(etspi->vcc_33v_Pin, 1);
-		if (status < 0) {
-			pr_err("%s gpio_direction_output vcc_33v_Pin failed\n",
-					__func__);
-			status = -EBUSY;
-			goto etspi_platformInit_rst_failed;
-		}
-		gpio_set_value(etspi->vcc_33v_Pin, 1);
-		pr_err("ets320:  vcc_33v_Pin set to high\n");
-
 		/* initial 18V power pin */
 		status = gpio_request(etspi->vdd_18v_Pin, "18v-gpio");
 		if (status < 0) {
@@ -637,7 +600,42 @@ int etspi_platformInit(struct etspi_data *etspi)
 		}
 
 		gpio_set_value(etspi->vdd_18v_Pin, 1);
-		pr_err("ets320:  vdd_18v_Pin set to high\n");
+		pr_err("etspi:  vdd_18v_Pin set to high\n");
+		mdelay(1);
+		/* initial 33V power pin */
+		status = gpio_request(etspi->vcc_33v_Pin, "33v-gpio");
+		if (status < 0) {
+			pr_err("%s gpio_requset vcc_33v_Pin failed\n",
+				__func__);
+			goto etspi_platformInit_rst_failed;
+		}
+		gpio_direction_output(etspi->vcc_33v_Pin, 1);
+		if (status < 0) {
+			pr_err("%s gpio_direction_output vcc_33v_Pin failed\n",
+					__func__);
+			status = -EBUSY;
+			goto etspi_platformInit_rst_failed;
+		}
+		gpio_set_value(etspi->vcc_33v_Pin, 1);
+		pr_err("etspi:  vcc_33v_Pin set to high\n");
+		mdelay(2);
+		/* Initial Reset Pin*/
+		status = gpio_request(etspi->rstPin, "reset-gpio");
+		if (status < 0) {
+			pr_err("%s gpio_requset etspi_Reset failed\n",
+				__func__);
+			goto etspi_platformInit_rst_failed;
+		}
+		gpio_direction_output(etspi->rstPin, 1);
+		if (status < 0) {
+			pr_err("%s gpio_direction_output Reset failed\n",
+					__func__);
+			status = -EBUSY;
+			goto etspi_platformInit_rst_failed;
+		}
+		/* gpio_set_value(etspi->rstPin, 1); */
+		pr_err("etspi:  reset to high\n");
+
 		/* Initial IRQ Pin*/
 		status = gpio_request(etspi->irqPin, "irq-gpio");
 		if (status < 0) {
@@ -763,65 +761,15 @@ static struct platform_driver etspi_driver = {
 /* remark for dual sensors */
 /* module_platform_driver(etspi_driver); */
 
-static int etspi_fb_notifier_callback(struct notifier_block *self,
-			unsigned long event, void *data)
-{
-	struct fb_event *evdata = data;
-	unsigned int blank;
-	int retval = 0;
-	struct etspi_data *etspi;
-	struct FPS_data *mdata = fpsData;
-
-	/* If we aren't interested in this event, skip it immediately ... */
-	if (event != FB_EVENT_BLANK /* FB_EARLY_EVENT_BLANK */)
-		return 0;
-	etspi = container_of(self, struct etspi_data, notifier);
-	blank = *(int *)evdata->data;
-
-	DEBUG_PRINT("[%s] : enter, blank=0x%x\n", __func__, blank);
-
-	switch (blank) {
-	case FB_BLANK_UNBLANK:
-		pr_debug("[%s] : lcd on notify\n", __func__);
-		etspi->lcd_off = false;
-		if (!mdata)
-			break;
-		/* when lcd on, enable fps in if it is needed */
-		if (request_irq_done && fps_ints.drdy_irq_flag != DRDY_IRQ_ENABLE) {
-			Interrupt_Init(etspi, fps_ints.int_mode, fps_ints.detect_period, fps_ints.detect_threshold);
-			DEBUG_PRINT("[%s] re-enable int\n", __func__);
-		}
-		break;
-	case FB_BLANK_POWERDOWN:
-		pr_debug("[%s] : lcd off notify\n", __func__);
-		etspi->lcd_off = true;
-		if (!mdata)
-			break;
-		/* when lcd off and  FPS  is not activte, disable fps int */
-		if (request_irq_done && !mdata->state && fps_ints.drdy_irq_flag == DRDY_IRQ_ENABLE) {
-			Interrupt_Free(etspi);
-			DEBUG_PRINT("[%s] disable int\n", __func__);
-		}
-		break;
-
-	default:
-		pr_debug("[%s] : other notifier, ignore\n", __func__);
-		break;
-	}
-	return retval;
-}
 
 
 static int etspi_remove(struct platform_device *pdev)
 {
-	struct etspi_data *etspi = dev_get_drvdata(&pdev->dev);
 	DEBUG_PRINT("%s(#%d)\n", __func__, __LINE__);
 	free_irq(gpio_irq, NULL);
 	del_timer_sync(&fps_ints.timer);
 	wake_lock_destroy(&et320_wake_lock);
 	request_irq_done = 0;
-	if (etspi)
-		fb_unregister_client(&etspi->notifier);
 	/* t_mode = 255; */
 	return 0;
 }
@@ -939,11 +887,7 @@ static int etspi_probe(struct platform_device *pdev)
 	etspi_reset(etspi);
 
 	fps_ints.drdy_irq_flag = DRDY_IRQ_DISABLE;
-	fps_ints.detect_period = 1;
-	fps_ints.detect_threshold = 1;
-	fps_ints.int_count = 0;
-	fps_ints.finger_on = 0;
-	fps_ints.int_mode = EDGE_TRIGGER_FALLING;
+
 	/* the timer is for ET310 */
 	setup_timer(&fps_ints.timer, interrupt_timer_routine, (unsigned long)&fps_ints);
 	add_timer(&fps_ints.timer);
@@ -958,9 +902,6 @@ static int etspi_probe(struct platform_device *pdev)
 		goto etspi_probe_failed;
 	}
 	request_irq_done = 0;
-	/* register screen on/off callback */
-	etspi->notifier.notifier_call = etspi_fb_notifier_callback;
-	fb_register_client(&etspi->notifier);
 	return status;
 
 etspi_probe_failed:

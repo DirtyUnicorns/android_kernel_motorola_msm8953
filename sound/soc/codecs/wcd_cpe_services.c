@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, 2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -333,7 +333,7 @@ static int cpe_register_write_repeat(u32 reg, u8 *ptr, u32 to_write)
 	struct wcd9xxx *wcd9xxx = dev_get_drvdata(codec->dev->parent);
 	int ret = 0;
 
-	ret = wcd9xxx_slim_write_repeat(wcd9xxx, reg, to_write, ptr);
+	ret = wcd9xxx_bus_write_repeat(wcd9xxx, reg, to_write, ptr);
 	if (ret != 0)
 		pr_err("%s: slim_write_repeat failed\n", __func__);
 
@@ -615,8 +615,10 @@ static enum cpe_svc_result cpe_deregister_generic(struct cpe_info *t_info,
 		return CPE_SVC_INVALID_HANDLE;
 	}
 
+	CPE_SVC_GRAB_LOCK(&cpe_d.cpe_svc_lock, "cpe_svc");
 	list_del(&(n->list));
 	kfree(reg_handle);
+	CPE_SVC_REL_LOCK(&cpe_d.cpe_svc_lock, "cpe_svc");
 
 	return CPE_SVC_SUCCESS;
 }
@@ -661,7 +663,7 @@ static void cpe_notify_cmi_client(struct cpe_info *t_info, u8 *payload,
 	hdr = CMI_GET_HEADER(payload);
 	service = CMI_HDR_GET_SERVICE(hdr);
 
-	notif.event = CPE_SVC_CMI_MSG;
+	notif.event = CMI_API_MSG;
 	notif.result = result;
 	notif.message = payload;
 
@@ -1176,7 +1178,7 @@ static enum cpe_process_result cpe_boot_complete(
 	}
 
 	pr_debug("%s: boot complete\n", __func__);
-	return CPE_SVC_SUCCESS;
+	return CPE_PROC_SUCCESS;
 }
 
 static enum cpe_process_result cpe_process_send_msg(

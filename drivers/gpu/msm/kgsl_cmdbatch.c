@@ -386,10 +386,10 @@ static int kgsl_cmdbatch_add_sync_fence(struct kgsl_device *device,
 		kgsl_cmdbatch_put(cmdbatch);
 
 		/*
-		 * Print a syncpoint_fence_expire trace if
-		 * fence is already signaled or there is
-		 * a failure in registering the fence waiter.
-		 */
+		* Print a syncpoint_fence_expire trace if
+		* fence is already signaled or there is
+		* a failure in registering the fence waiter.
+		*/
 		trace_syncpoint_fence_expire(cmdbatch, (ret < 0) ?
 				"error" : fence->name);
 	} else {

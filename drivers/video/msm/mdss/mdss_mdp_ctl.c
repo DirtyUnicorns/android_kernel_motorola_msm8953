@@ -698,7 +698,8 @@ int mdss_mdp_get_panel_params(struct mdss_mdp_pipe *pipe,
 			*fps = pinfo->panel_max_fps;
 			*v_total = pinfo->panel_max_vtotal;
 		} else {
-			*fps = mdss_panel_get_framerate(pinfo);
+			*fps = mdss_panel_get_framerate(pinfo,
+					FPS_RESOLUTION_HZ);
 			*v_total = mdss_panel_get_vtotal(pinfo);
 		}
 		*xres = get_panel_width(mixer->ctl);
@@ -838,7 +839,8 @@ static u32 mdss_mdp_get_vbp_factor(struct mdss_mdp_ctl *ctl)
 		return 0;
 
 	pinfo = &ctl->panel_data->panel_info;
-	fps = mdss_panel_get_framerate(pinfo);
+	fps = mdss_panel_get_framerate(pinfo,
+			FPS_RESOLUTION_HZ);
 	v_total = mdss_panel_get_vtotal(pinfo);
 	vbp = pinfo->lcdc.v_back_porch + pinfo->lcdc.v_pulse_width;
 	vbp += pinfo->prg_fet;
@@ -886,7 +888,8 @@ static u32 __calc_prefill_line_time_us(struct mdss_mdp_ctl *ctl)
 		return 0;
 
 	pinfo = &ctl->panel_data->panel_info;
-	fps = mdss_panel_get_framerate(pinfo);
+	fps = mdss_panel_get_framerate(pinfo,
+			FPS_RESOLUTION_HZ);
 	v_total = mdss_panel_get_vtotal(pinfo);
 	vbp = pinfo->lcdc.v_back_porch + pinfo->lcdc.v_pulse_width;
 	vbp += pinfo->prg_fet;
@@ -942,7 +945,8 @@ static u32 mdss_mdp_calc_prefill_line_time(struct mdss_mdp_ctl *ctl,
 		return -EINVAL;
 
 	pinfo = &ctl->panel_data->panel_info;
-	fps = mdss_panel_get_framerate(pinfo);
+	fps = mdss_panel_get_framerate(pinfo,
+		FPS_RESOLUTION_HZ);
 	v_total = mdss_panel_get_vtotal(pinfo);
 
 	/* calculate the minimum prefill */
@@ -1244,7 +1248,8 @@ static void mdss_mdp_perf_calc_mixer(struct mdss_mdp_mixer *mixer,
 				fps = pinfo->panel_max_fps;
 				v_total = pinfo->panel_max_vtotal;
 			} else {
-				fps = mdss_panel_get_framerate(pinfo);
+				fps = mdss_panel_get_framerate(pinfo,
+						FPS_RESOLUTION_HZ);
 				v_total = mdss_panel_get_vtotal(pinfo);
 			}
 		} else {
@@ -4254,11 +4259,15 @@ end:
  */
 static void mdss_mdp_pipe_reset(struct mdss_mdp_mixer *mixer, bool is_recovery)
 {
-	unsigned long pipe_map = mixer->pipe_mapped;
+	unsigned long pipe_map;
 	u32 bit = 0;
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
 	bool sw_rst_avail = mdss_mdp_pipe_is_sw_reset_available(mdata);
 
+	if (!mixer)
+		return;
+
+	pipe_map = mixer->pipe_mapped;
 	pr_debug("pipe_map=0x%lx\n", pipe_map);
 	for_each_set_bit_from(bit, &pipe_map, MAX_PIPES_PER_LM) {
 		struct mdss_mdp_pipe *pipe;
@@ -4354,7 +4363,8 @@ int mdss_mdp_ctl_reset(struct mdss_mdp_ctl *ctl, bool is_recovery)
 	if (mixer) {
 		mdss_mdp_pipe_reset(mixer, is_recovery);
 
-		if (is_dual_lm_single_display(ctl->mfd))
+		if (is_dual_lm_single_display(ctl->mfd) &&
+				ctl->mixer_right)
 			mdss_mdp_pipe_reset(ctl->mixer_right, is_recovery);
 	}
 
@@ -5238,10 +5248,8 @@ int mdss_mdp_ctl_update_fps(struct mdss_mdp_ctl *ctl)
 		(pinfo->dfps_update ==
 			DFPS_IMMEDIATE_MULTI_MODE_HFP_CALC_CLK) ||
 		pinfo->dfps_update == DFPS_IMMEDIATE_CLK_UPDATE_MODE) {
-		if (pinfo->type == DTV_PANEL)
-			new_fps = pinfo->lcdc.frame_rate;
-		else
-			new_fps = mdss_panel_get_framerate(pinfo);
+		new_fps = mdss_panel_get_framerate(pinfo,
+				FPS_RESOLUTION_DEFAULT);
 	} else {
 		new_fps = pinfo->new_fps;
 	}

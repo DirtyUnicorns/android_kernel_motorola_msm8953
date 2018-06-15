@@ -491,7 +491,7 @@ struct page **drm_gem_get_pages(struct drm_gem_object *obj)
 		 * __GFP_DMA32 to be set in mapping_gfp_mask(inode->i_mapping)
 		 * so shmem can relocate pages during swapin if required.
 		 */
-		BUG_ON(mapping_gfp_constraint(mapping, __GFP_DMA32) &&
+		BUG_ON((mapping_gfp_mask(mapping) & __GFP_DMA32) &&
 				(page_to_pfn(p) >= 0x00100000UL));
 	}
 
@@ -710,12 +710,12 @@ drm_gem_object_release_handle(int id, void *ptr, void *data)
 	struct drm_gem_object *obj = ptr;
 	struct drm_device *dev = obj->dev;
 
+	if (dev->driver->gem_close_object)
+		dev->driver->gem_close_object(obj, file_priv);
+
 	if (drm_core_check_feature(dev, DRIVER_PRIME))
 		drm_gem_remove_prime_handles(obj, file_priv);
 	drm_vma_node_revoke(&obj->vma_node, file_priv->filp);
-
-	if (dev->driver->gem_close_object)
-		dev->driver->gem_close_object(obj, file_priv);
 
 	drm_gem_object_handle_unreference_unlocked(obj);
 

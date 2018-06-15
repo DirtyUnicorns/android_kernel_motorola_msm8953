@@ -10,6 +10,7 @@ Required properties:
     - "qcom,camera-flash"
     - "qcom,led-flash"
     - "qcom,led-flash1"
+    - "qcom,leds-gpio-flash"
 - qcom,flash-type : Should contain type flash device
     - 1 for LED flash
     - 2 for strobe flash
@@ -47,6 +48,11 @@ Optional properties:
 - label : should contain unique flash name to differentiate from other flash
     - "adp1660"
     - "bd7710"
+- qcom,gpio-custom1 : should contain index to gpio used to select between muxed
+    flashes. Only used when the "mux_sel_option" member of "msm_flash_cfg_data_t"
+    tells the driver to use the mux sel. GPIO is set to HIGH when flash is
+    turned ON, LOW when turned OFF.
+
 Example:
 
 qcom,led-flash@60 {

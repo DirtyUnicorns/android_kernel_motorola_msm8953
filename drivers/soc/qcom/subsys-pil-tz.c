@@ -582,7 +582,8 @@ static void pil_remove_proxy_vote(struct pil_desc *pil)
 }
 
 static int pil_init_image_trusted(struct pil_desc *pil,
-		const u8 *metadata, size_t size)
+		const u8 *metadata, size_t size,
+		 phys_addr_t addr, size_t sz)
 {
 	struct pil_tz_data *d = desc_to_data(pil);
 	struct pas_init_image_req {
@@ -613,26 +614,20 @@ static int pil_init_image_trusted(struct pil_desc *pil,
 		scm_pas_disable_bw();
 		return -ENOMEM;
 	}
-	pr_info("[%s]: %s alloc region - Start: %pa, size: %zu\n", __func__,
-		 d->subsys_desc.name, &mdata_phys, size);
 
 	/* Make sure there are no mappings in PKMAP and fixmap */
 	kmap_flush_unused();
-	pr_info("[%s]: line %d\n", __func__, __LINE__);
 	kmap_atomic_flush_unused();
 
-	pr_info("[%s]: copying %s metadata ...", __func__, d->subsys_desc.name);
 	memcpy(mdata_buf, metadata, size);
-	pr_info("FINISHED\n");
+
 	request.proc = d->pas_id;
 	request.image_addr = mdata_phys;
 
 	if (!is_scm_armv8()) {
-		pr_info("[%s]: scm_call - PAS_INIT_IMAGE_CMD\n", __func__);
 		ret = scm_call(SCM_SVC_PIL, PAS_INIT_IMAGE_CMD, &request,
 				sizeof(request), &scm_ret, sizeof(scm_ret));
 	} else {
-		pr_info("[%s]: scm_call2 - PAS_INIT_IMAGE_CMD\n", __func__);
 		desc.args[0] = d->pas_id;
 		desc.args[1] = mdata_phys;
 		desc.arginfo = SCM_ARGS(2, SCM_VAL, SCM_RW);
@@ -640,11 +635,9 @@ static int pil_init_image_trusted(struct pil_desc *pil,
 				&desc);
 		scm_ret = desc.ret[0];
 	}
-	pr_info("[%s]: ret = %d, scm_ret = %d\n", __func__, ret, scm_ret);
+
 	dma_free_attrs(&dev, size, mdata_buf, mdata_phys, &attrs);
-	pr_info("[%s]: line %d\n", __func__, __LINE__);
 	scm_pas_disable_bw();
-	pr_info("[%s]: line %d\n", __func__, __LINE__);
 	if (ret)
 		return ret;
 	return scm_ret;
@@ -841,9 +834,6 @@ static int subsys_powerup(const struct subsys_desc *subsys)
 {
 	struct pil_tz_data *d = subsys_to_data(subsys);
 	int ret = 0;
-
-	pr_info("[%s]: %s powerd up in %s(%d)\n", __func__,
-		 d->subsys_desc.name, current->comm, current->pid);
 
 	if (subsys->stop_ack_irq)
 		reinit_completion(&d->stop_ack);
@@ -1052,20 +1042,46 @@ static int pil_tz_driver_probe(struct platform_device *pdev)
 		res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
 						"sp2soc_irq_status");
 		d->irq_status = devm_ioremap_resource(&pdev->dev, res);
+		if (IS_ERR(d->irq_status)) {
+			dev_err(&pdev->dev, "Invalid resource for sp2soc_irq_status\n");
+			rc = PTR_ERR(d->irq_status);
+			goto err_ramdump;
+		}
+
 		res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
 						"sp2soc_irq_clr");
 		d->irq_clear = devm_ioremap_resource(&pdev->dev, res);
+		if (IS_ERR(d->irq_clear)) {
+			dev_err(&pdev->dev, "Invalid resource for sp2soc_irq_clr\n");
+			rc = PTR_ERR(d->irq_clear);
+			goto err_ramdump;
+		}
+
 		res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
 						"sp2soc_irq_mask");
 		d->irq_mask = devm_ioremap_resource(&pdev->dev, res);
+		if (IS_ERR(d->irq_mask)) {
+			dev_err(&pdev->dev, "Invalid resource for sp2soc_irq_mask\n");
+			rc = PTR_ERR(d->irq_mask);
+			goto err_ramdump;
+		}
+
 		res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
 						"rmb_err");
 		d->err_status = devm_ioremap_resource(&pdev->dev, res);
+		if (IS_ERR(d->err_status)) {
+			dev_err(&pdev->dev, "Invalid resource for rmb_err\n");
+			rc = PTR_ERR(d->err_status);
+			goto err_ramdump;
+		}
+
 		rc = of_property_read_u32_array(pdev->dev.of_node,
 		       "qcom,spss-scsr-bits", d->bits_arr, sizeof(d->bits_arr)/
 							sizeof(d->bits_arr[0]));
-		if (rc)
+		if (rc) {
 			dev_err(&pdev->dev, "Failed to read qcom,spss-scsr-bits");
+			goto err_ramdump;
+		}
 	} else {
 		d->subsys_desc.err_fatal_handler =
 						subsys_err_fatal_intr_handler;
@@ -1090,6 +1106,7 @@ err_subsys:
 	destroy_ramdump_device(d->ramdump_dev);
 err_ramdump:
 	pil_desc_release(&d->desc);
+	platform_set_drvdata(pdev, NULL);
 
 	return rc;
 }

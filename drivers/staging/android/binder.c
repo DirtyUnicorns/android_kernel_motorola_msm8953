@@ -52,6 +52,7 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <asm/cacheflush.h>
+#include <linux/atomic.h>
 #include <linux/fdtable.h>
 #include <linux/file.h>
 #include <linux/freezer.h>
@@ -2099,6 +2100,26 @@ static void binder_send_failed_reply(struct binder_transaction *t,
 }
 
 /**
+ * binder_cleanup_transaction() - cleans up undelivered transaction
+ * @t:		transaction that needs to be cleaned up
+ * @reason:	reason the transaction wasn't delivered
+ * @error_code:	error to return to caller (if synchronous call)
+ */
+static void binder_cleanup_transaction(struct binder_transaction *t,
+				       const char *reason,
+				       uint32_t error_code)
+{
+	if (t->buffer->target_node && !(t->flags & TF_ONE_WAY)) {
+		binder_send_failed_reply(t, error_code);
+	} else {
+		binder_debug(BINDER_DEBUG_DEAD_TRANSACTION,
+			"undelivered transaction %d, %s\n",
+			t->debug_id, reason);
+		binder_free_transaction(t);
+	}
+}
+
+/**
  * binder_validate_object() - checks for a valid metadata object in a buffer.
  * @buffer:	binder_buffer that we're parsing.
  * @offset:	offset in the buffer at which to validate an object.
@@ -2368,8 +2389,7 @@ static void binder_transaction_buffer_release(struct binder_proc *proc,
 				       debug_id, (u64)fda->num_fds);
 				continue;
 			}
-			fd_array = (u32 *)(uintptr_t)
-				(parent_buffer + fda->parent_offset);
+			fd_array = (u32 *)(parent_buffer + (uintptr_t)fda->parent_offset);
 			for (fd_index = 0; fd_index < fda->num_fds; fd_index++)
 				task_close_fd(proc, fd_array[fd_index]);
 		} break;
@@ -2593,8 +2613,7 @@ static int binder_translate_fd_array(struct binder_fd_array_object *fda,
 	 */
 	parent_buffer = parent->buffer -
 		binder_alloc_get_user_buffer_offset(&target_proc->alloc);
-	fd_array = (u32 *)(uintptr_t)
-                (parent_buffer + fda->parent_offset);
+	fd_array = (u32 *)(parent_buffer + (uintptr_t)fda->parent_offset);
 	if (!IS_ALIGNED((unsigned long)fd_array, sizeof(u32))) {
 		binder_user_error("%d:%d parent offset not aligned correctly.\n",
 				  proc->pid, thread->pid);
@@ -2660,7 +2679,7 @@ static int binder_fixup_parent(struct binder_transaction *t,
 				  proc->pid, thread->pid);
 		return -EINVAL;
 	}
-	parent_buffer = (u8 *)(uintptr_t)(parent->buffer -
+	parent_buffer = (u8 *)((uintptr_t)parent->buffer -
 			binder_alloc_get_user_buffer_offset(
 				&target_proc->alloc));
 	*(binder_uintptr_t *)(parent_buffer + bp->parent_offset) = bp->buffer;
@@ -2740,6 +2759,48 @@ static bool binder_proc_transaction(struct binder_transaction *t,
 	binder_node_unlock(node);
 
 	return true;
+}
+
+/**
+ * binder_get_node_refs_for_txn() - Get required refs on node for txn
+ * @node:         struct binder_node for which to get refs
+ * @proc:         returns @node->proc if valid
+ * @error:        if no @proc then returns BR_DEAD_REPLY
+ *
+ * User-space normally keeps the node alive when creating a transaction
+ * since it has a reference to the target. The local strong ref keeps it
+ * alive if the sending process dies before the target process processes
+ * the transaction. If the source process is malicious or has a reference
+ * counting bug, relying on the local strong ref can fail.
+ *
+ * Since user-space can cause the local strong ref to go away, we also take
+ * a tmpref on the node to ensure it survives while we are constructing
+ * the transaction. We also need a tmpref on the proc while we are
+ * constructing the transaction, so we take that here as well.
+ *
+ * Return: The target_node with refs taken or NULL if no @node->proc is NULL.
+ * Also sets @proc if valid. If the @node->proc is NULL indicating that the
+ * target proc has died, @error is set to BR_DEAD_REPLY
+ */
+static struct binder_node *binder_get_node_refs_for_txn(
+		struct binder_node *node,
+		struct binder_proc **procp,
+		uint32_t *error)
+{
+	struct binder_node *target_node = NULL;
+
+	binder_node_inner_lock(node);
+	if (node->proc) {
+		target_node = node;
+		binder_inc_node_nilocked(node, 1, 0, NULL);
+		binder_inc_node_tmpref_ilocked(node);
+		node->proc->tmp_ref++;
+		*procp = node->proc;
+	} else
+		*error = BR_DEAD_REPLY;
+	binder_node_inner_unlock(node);
+
+	return target_node;
 }
 
 static void binder_transaction(struct binder_proc *proc,
@@ -2844,43 +2905,35 @@ static void binder_transaction(struct binder_proc *proc,
 			ref = binder_get_ref_olocked(proc, tr->target.handle,
 						     true);
 			if (ref) {
-				binder_inc_node(ref->node, 1, 0, NULL);
-				target_node = ref->node;
+				target_node = binder_get_node_refs_for_txn(
+						ref->node, &target_proc,
+						&return_error);
+			} else {
+				binder_user_error("%d:%d got transaction to invalid handle\n",
+						  proc->pid, thread->pid);
+				return_error = BR_FAILED_REPLY;
 			}
 			binder_proc_unlock(proc);
-			if (target_node == NULL) {
-				binder_user_error("%d:%d got transaction to invalid handle\n",
-					proc->pid, thread->pid);
-				return_error = BR_FAILED_REPLY;
-				return_error_param = -EINVAL;
-				return_error_line = __LINE__;
-				goto err_invalid_target_handle;
-			}
 		} else {
 			mutex_lock(&context->context_mgr_node_lock);
 			target_node = context->binder_context_mgr_node;
-			if (target_node == NULL) {
+			if (target_node)
+				target_node = binder_get_node_refs_for_txn(
+						target_node, &target_proc,
+						&return_error);
+			else
 				return_error = BR_DEAD_REPLY;
-				mutex_unlock(&context->context_mgr_node_lock);
-				return_error_line = __LINE__;
-				goto err_no_context_mgr_node;
-			}
-			binder_inc_node(target_node, 1, 0, NULL);
 			mutex_unlock(&context->context_mgr_node_lock);
 		}
-		e->to_node = target_node->debug_id;
-		binder_node_lock(target_node);
-		target_proc = target_node->proc;
-		if (target_proc == NULL) {
-			binder_node_unlock(target_node);
-			return_error = BR_DEAD_REPLY;
+		if (!target_node) {
+			/*
+			 * return_error is set above
+			 */
+			return_error_param = -EINVAL;
 			return_error_line = __LINE__;
 			goto err_dead_binder;
 		}
-		binder_inner_proc_lock(target_proc);
-		target_proc->tmp_ref++;
-		binder_inner_proc_unlock(target_proc);
-		binder_node_unlock(target_node);
+		e->to_node = target_node->debug_id;
 		if (security_binder_transaction(proc->tsk,
 						target_proc->tsk) < 0) {
 			return_error = BR_FAILED_REPLY;
@@ -3239,6 +3292,8 @@ static void binder_transaction(struct binder_proc *proc,
 	if (target_thread)
 		binder_thread_dec_tmpref(target_thread);
 	binder_proc_dec_tmpref(target_proc);
+	if (target_node)
+		binder_dec_node_tmpref(target_node);
 	/*
 	 * write barrier to synchronize with initialization
 	 * of log entry
@@ -3258,6 +3313,8 @@ err_bad_parent:
 err_copy_data_failed:
 	trace_binder_transaction_failed_buffer_release(t->buffer);
 	binder_transaction_buffer_release(target_proc, t->buffer, offp);
+	if (target_node)
+		binder_dec_node_tmpref(target_node);
 	target_node = NULL;
 	t->buffer->transaction = NULL;
 	binder_alloc_free_buf(&target_proc->alloc, t->buffer);
@@ -3272,13 +3329,14 @@ err_bad_call_stack:
 err_empty_call_stack:
 err_dead_binder:
 err_invalid_target_handle:
-err_no_context_mgr_node:
 	if (target_thread)
 		binder_thread_dec_tmpref(target_thread);
 	if (target_proc)
 		binder_proc_dec_tmpref(target_proc);
-	if (target_node)
+	if (target_node) {
 		binder_dec_node(target_node, 1, 0);
+		binder_dec_node_tmpref(target_node);
+	}
 
 	binder_debug(BINDER_DEBUG_FAILED_TRANSACTION,
 		     "%d:%d transaction failed %d/%d, size %lld-%lld line %d\n",
@@ -4143,12 +4201,20 @@ retry:
 		if (put_user(cmd, (uint32_t __user *)ptr)) {
 			if (t_from)
 				binder_thread_dec_tmpref(t_from);
+
+			binder_cleanup_transaction(t, "put_user failed",
+						   BR_FAILED_REPLY);
+
 			return -EFAULT;
 		}
 		ptr += sizeof(uint32_t);
 		if (copy_to_user(ptr, &tr, sizeof(tr))) {
 			if (t_from)
 				binder_thread_dec_tmpref(t_from);
+
+			binder_cleanup_transaction(t, "copy_to_user failed",
+						   BR_FAILED_REPLY);
+
 			return -EFAULT;
 		}
 		ptr += sizeof(tr);
@@ -4218,15 +4284,9 @@ static void binder_release_work(struct binder_proc *proc,
 			struct binder_transaction *t;
 
 			t = container_of(w, struct binder_transaction, work);
-			if (t->buffer->target_node &&
-			    !(t->flags & TF_ONE_WAY)) {
-				binder_send_failed_reply(t, BR_DEAD_REPLY);
-			} else {
-				binder_debug(BINDER_DEBUG_DEAD_TRANSACTION,
-					"undelivered transaction %d\n",
-					t->debug_id);
-				binder_free_transaction(t);
-			}
+
+			binder_cleanup_transaction(t, "process died.",
+						   BR_DEAD_REPLY);
 		} break;
 		case BINDER_WORK_RETURN_ERROR: {
 			struct binder_error *e = container_of(
@@ -4577,6 +4637,8 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	/*pr_info("binder_ioctl: %d:%d %x %lx\n",
 			proc->pid, current->pid, cmd, arg);*/
+
+	binder_selftest_alloc(&proc->alloc);
 
 	trace_binder_ioctl(cmd, arg);
 

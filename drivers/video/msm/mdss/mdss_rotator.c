@@ -1128,6 +1128,7 @@ static void mdss_rotator_release_from_work_distribution(
 		bool free_perf = false;
 		u32 wb_idx = entry->queue->hw->wb_id;
 
+		mutex_lock(&mgr->lock);
 		mutex_lock(&entry->perf->work_dis_lock);
 		if (entry->perf->work_distribution[wb_idx])
 			entry->perf->work_distribution[wb_idx]--;
@@ -1151,6 +1152,7 @@ static void mdss_rotator_release_from_work_distribution(
 			mdss_rotator_clk_ctrl(mgr, false);
 			entry->perf = NULL;
 		}
+		mutex_unlock(&mgr->lock);
 	}
 }
 
@@ -1199,13 +1201,17 @@ static int mdss_rotator_config_dnsc_factor(struct mdss_rot_mgr *mgr,
 		}
 		entry->dnsc_factor_w = src_w / dst_w;
 		bit = fls(entry->dnsc_factor_w);
-		if ((entry->dnsc_factor_w & ~BIT(bit - 1)) || (bit > 5)) {
+		/*
+		 * New Chipsets supports downscale upto 1/64
+		 * change the Bit check from 5 to 7 to support 1/64 down scale
+		 */
+		if ((entry->dnsc_factor_w & ~BIT(bit - 1)) || (bit > 7)) {
 			ret = -EINVAL;
 			goto dnsc_err;
 		}
 		entry->dnsc_factor_h = src_h / dst_h;
 		bit = fls(entry->dnsc_factor_h);
-		if ((entry->dnsc_factor_h & ~BIT(bit - 1)) || (bit > 5)) {
+		if ((entry->dnsc_factor_h & ~BIT(bit - 1)) || (bit > 7)) {
 			ret = -EINVAL;
 			goto dnsc_err;
 		}
@@ -2047,7 +2053,6 @@ static int mdss_rotator_close_session(struct mdss_rot_mgr *mgr,
 	list_del_init(&perf->list);
 	mutex_unlock(&perf->work_dis_lock);
 	mutex_unlock(&private->perf_lock);
-	mutex_unlock(&mgr->lock);
 
 	if (offload_release_work)
 		goto done;
@@ -2060,6 +2065,7 @@ static int mdss_rotator_close_session(struct mdss_rot_mgr *mgr,
 done:
 	pr_debug("Closed session id:%u", id);
 	ATRACE_END(__func__);
+	mutex_unlock(&mgr->lock);
 	return 0;
 }
 
@@ -2189,6 +2195,12 @@ static int mdss_rotator_handle_request(struct mdss_rot_mgr *mgr,
 	struct mdss_rot_entry_container *req = NULL;
 	int size, ret;
 	uint32_t req_count;
+	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
+
+	if (mdata->handoff_pending) {
+		pr_err("Rotator request failed. Handoff pending\n");
+		return -EPERM;
+	}
 
 	if (mdss_get_sd_client_cnt()) {
 		pr_err("rot request not permitted during secure display session\n");
@@ -2429,6 +2441,31 @@ handle_request32_err:
 	return ret;
 }
 
+static unsigned int __do_compat_ioctl_rot(unsigned int cmd32)
+{
+	unsigned int cmd;
+
+	switch (cmd32) {
+	case MDSS_ROTATION_REQUEST32:
+		cmd = MDSS_ROTATION_REQUEST;
+		break;
+	case MDSS_ROTATION_OPEN32:
+		cmd = MDSS_ROTATION_OPEN;
+		break;
+	case MDSS_ROTATION_CLOSE32:
+		cmd = MDSS_ROTATION_CLOSE;
+		break;
+	case MDSS_ROTATION_CONFIG32:
+		cmd = MDSS_ROTATION_CONFIG;
+		break;
+	default:
+		cmd = cmd32;
+		break;
+	}
+
+	return cmd;
+}
+
 static long mdss_rotator_compat_ioctl(struct file *file, unsigned int cmd,
 	unsigned long arg)
 {
@@ -2450,6 +2487,8 @@ static long mdss_rotator_compat_ioctl(struct file *file, unsigned int cmd,
 		pr_err("Calling ioctl with unrecognized rot_file_private\n");
 		return -EINVAL;
 	}
+
+	cmd = __do_compat_ioctl_rot(cmd);
 
 	switch (cmd) {
 	case MDSS_ROTATION_REQUEST:
@@ -2704,8 +2743,8 @@ static int mdss_rotator_get_dt_vreg_data(struct device *dev,
 			mp->vreg_config[i].vreg_name,
 			mp->vreg_config[i].min_voltage,
 			mp->vreg_config[i].max_voltage,
-			mp->vreg_config[i].enable_load,
-			mp->vreg_config[i].disable_load);
+			mp->vreg_config[i].load[DSS_REG_MODE_ENABLE],
+			mp->vreg_config[i].load[DSS_REG_MODE_DISABLE]);
 	}
 	return rc;
 

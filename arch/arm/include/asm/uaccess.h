@@ -57,11 +57,25 @@ extern int fixup_exception(struct pt_regs *regs);
  */
 static inline unsigned int uaccess_save_and_enable(void)
 {
+#ifdef CONFIG_CPU_SW_DOMAIN_PAN
+	unsigned int old_domain = get_domain();
+
+	/* Set the current domain access to permit user accesses */
+	set_domain((old_domain & ~domain_mask(DOMAIN_USER)) |
+		   domain_val(DOMAIN_USER, DOMAIN_CLIENT));
+
+	return old_domain;
+#else
 	return 0;
+#endif
 }
 
 static inline void uaccess_restore(unsigned int flags)
 {
+#ifdef CONFIG_CPU_SW_DOMAIN_PAN
+	/* Restore the user access mask */
+	set_domain(flags);
+#endif
 }
 
 /*
@@ -505,7 +519,10 @@ arm_copy_from_user(void *to, const void __user *from, unsigned long n);
 static inline unsigned long __must_check
 __copy_from_user(void *to, const void __user *from, unsigned long n)
 {
-	unsigned int __ua_flags = uaccess_save_and_enable();
+	unsigned int __ua_flags;
+
+	check_object_size(to, n, false);
+	__ua_flags = uaccess_save_and_enable();
 	n = arm_copy_from_user(to, from, n);
 	uaccess_restore(__ua_flags);
 	return n;
@@ -520,11 +537,15 @@ static inline unsigned long __must_check
 __copy_to_user(void __user *to, const void *from, unsigned long n)
 {
 #ifndef CONFIG_UACCESS_WITH_MEMCPY
-	unsigned int __ua_flags = uaccess_save_and_enable();
+	unsigned int __ua_flags;
+
+	check_object_size(from, n, true);
+	__ua_flags = uaccess_save_and_enable();
 	n = arm_copy_to_user(to, from, n);
 	uaccess_restore(__ua_flags);
 	return n;
 #else
+	check_object_size(from, n, true);
 	return arm_copy_to_user(to, from, n);
 #endif
 }

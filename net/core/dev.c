@@ -3718,7 +3718,11 @@ static bool skb_pfmemalloc_protocol(struct sk_buff *skb)
 	}
 }
 
-int (*athrs_fast_nat_recv)(struct sk_buff *skb) __rcu __read_mostly;
+int (*gsb_nw_stack_recv)(struct sk_buff *skb) __rcu __read_mostly;
+EXPORT_SYMBOL(gsb_nw_stack_recv);
+
+int (*athrs_fast_nat_recv)(struct sk_buff *skb,
+			   struct packet_type *pt_temp) __rcu __read_mostly;
 EXPORT_SYMBOL(athrs_fast_nat_recv);
 
 int (*embms_tm_multicast_recv)(struct sk_buff *skb) __rcu __read_mostly;
@@ -3733,7 +3737,8 @@ static int __netif_receive_skb_core(struct sk_buff *skb, bool pfmemalloc)
 	bool deliver_exact = false;
 	int ret = NET_RX_DROP;
 	__be16 type;
-	int (*fast_recv)(struct sk_buff *skb);
+	int (*gsb_ns_recv)(struct sk_buff *skb);
+	int (*fast_recv)(struct sk_buff *skb, struct packet_type *pt_temp);
 	int (*embms_recv)(struct sk_buff *skb);
 
 	net_timestamp_check(!netdev_tstamp_prequeue, skb);
@@ -3780,9 +3785,17 @@ another_round:
 	}
 
 skip_taps:
+	gsb_ns_recv = rcu_dereference(gsb_nw_stack_recv);
+	if (gsb_ns_recv) {
+		if (gsb_ns_recv(skb)) {
+			ret = NET_RX_SUCCESS;
+			goto out;
+		}
+	}
+
 	fast_recv = rcu_dereference(athrs_fast_nat_recv);
 	if (fast_recv) {
-		if (fast_recv(skb)) {
+		if (fast_recv(skb, pt_prev)) {
 			ret = NET_RX_SUCCESS;
 			goto out;
 		}
@@ -4143,6 +4156,7 @@ static enum gro_result dev_gro_receive(struct napi_struct *napi, struct sk_buff 
 		NAPI_GRO_CB(skb)->flush = 0;
 		NAPI_GRO_CB(skb)->free = 0;
 		NAPI_GRO_CB(skb)->encap_mark = 0;
+		NAPI_GRO_CB(skb)->recursion_counter = 0;
 
 		/* Setup for GRO checksum validation */
 		switch (skb->ip_summed) {
@@ -4418,6 +4432,24 @@ __sum16 __skb_gro_checksum_complete(struct sk_buff *skb)
 }
 EXPORT_SYMBOL(__skb_gro_checksum_complete);
 
+static void net_rps_send_ipi(struct softnet_data *remsd)
+{
+#ifdef CONFIG_RPS
+	while (remsd) {
+		struct softnet_data *next = remsd->rps_ipi_next;
+
+		if (cpu_online(remsd->cpu)) {
+			smp_call_function_single_async(remsd->cpu, &remsd->csd);
+		} else {
+			rps_lock(remsd);
+			remsd->backlog.state = 0;
+			rps_unlock(remsd);
+		}
+		remsd = next;
+	}
+#endif
+}
+
 /*
  * net_rps_action_and_irq_enable sends any pending IPI's for rps.
  * Note: called with local irq disabled, but exits with local irq enabled.
@@ -4433,20 +4465,7 @@ static void net_rps_action_and_irq_enable(struct softnet_data *sd)
 		local_irq_enable();
 
 		/* Send pending IPI's to kick RPS processing on remote cpus. */
-		while (remsd) {
-			struct softnet_data *next = remsd->rps_ipi_next;
-
-			if (cpu_online(remsd->cpu)) {
-				smp_call_function_single_async(remsd->cpu,
-							   &remsd->csd);
-			} else {
-				pr_err("%s() cpu offline\n", __func__);
-				rps_lock(remsd);
-				remsd->backlog.state = 0;
-				rps_unlock(remsd);
-			}
-			remsd = next;
-		}
+		net_rps_send_ipi(remsd);
 	} else
 #endif
 		local_irq_enable();
@@ -7114,7 +7133,7 @@ static int dev_cpu_callback(struct notifier_block *nfb,
 	struct sk_buff **list_skb;
 	struct sk_buff *skb;
 	unsigned int cpu, oldcpu = (unsigned long)ocpu;
-	struct softnet_data *sd, *oldsd;
+	struct softnet_data *sd, *oldsd, *remsd;
 
 	if (action != CPU_DEAD && action != CPU_DEAD_FROZEN)
 		return NOTIFY_OK;
@@ -7157,6 +7176,13 @@ static int dev_cpu_callback(struct notifier_block *nfb,
 
 	raise_softirq_irqoff(NET_TX_SOFTIRQ);
 	local_irq_enable();
+
+#ifdef CONFIG_RPS
+	remsd = oldsd->rps_ipi_list;
+	oldsd->rps_ipi_list = NULL;
+#endif
+	/* send out pending IPI's on offline CPU */
+	net_rps_send_ipi(remsd);
 
 	/* Process offline CPU's input_pkt_queue */
 	while ((skb = __skb_dequeue(&oldsd->process_queue))) {

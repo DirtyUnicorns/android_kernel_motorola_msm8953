@@ -586,6 +586,7 @@ static int f2fs_mknod(struct inode *dir, struct dentry *dentry,
 	alloc_nid_done(sbi, inode->i_ino);
 
 	d_instantiate_new(dentry, inode);
+
 	if (IS_DIRSYNC(dir))
 		f2fs_sync_fs(sbi->sb, 1);
 	return 0;

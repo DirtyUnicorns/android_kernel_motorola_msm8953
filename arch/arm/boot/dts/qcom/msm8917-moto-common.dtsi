@@ -21,8 +21,9 @@
 	aliases {
 		i2c3 = &i2c_3;
 		i2c4 = &i2c_4;
+		i2c5 = &i2c_5;
 		/delete-property/ spi3;
-		/delete-property/ i2c5;
+/*		/delete-property/ i2c5;*/
 	};
 
 	reserved-memory {
@@ -122,6 +123,32 @@
 		dma-names = "tx", "rx";
 	};
 
+	i2c_5: i2c@7af5000 { /* BLSP2 QUP1 */
+		status = "okay";
+		compatible = "qcom,i2c-msm-v2";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg-names = "qup_phys_addr";
+		reg = <0x7af5000 0x600>;
+		interrupt-names = "qup_irq";
+		interrupts = <0 299 0>;
+		qcom,clk-freq-out = <400000>;
+		qcom,clk-freq-in  = <19200000>;
+		clock-names = "iface_clk", "core_clk";
+		clocks = <&clock_gcc clk_gcc_blsp2_ahb_clk>,
+			<&clock_gcc clk_gcc_blsp2_qup1_i2c_apps_clk>;
+
+		pinctrl-names = "i2c_active", "i2c_sleep";
+		pinctrl-0 = <&i2c_5_active>;
+		pinctrl-1 = <&i2c_5_sleep>;
+		qcom,noise-rjct-scl = <0>;
+		qcom,noise-rjct-sda = <0>;
+		qcom,master-id = <84>;
+		dmas = <&dma_blsp2 4 64 0x20000020 0x20>,
+			<&dma_blsp2 5 32 0x20000020 0x20>;
+		dma-names = "tx", "rx";
+	};
+
 	et320: et320{
 		compatible = "egistec,et320";
 		status = "/chosen", "mmi,fps", "true";
@@ -153,9 +180,10 @@
 			qcom,sensor-name = "chg_therm";
 		};
 
-		sensor_information15: qcom,sensor-information-15 {
+		sensor_information14: qcom,sensor-information-14 {
 			qcom,sensor-type = "adc";
 			qcom,sensor-name = "msm_therm";
+			qcom,scaling-factor = <1>;
 		};
 
 		sensor_information17: qcom,sensor-information-17 {
@@ -404,6 +432,14 @@
 	qcom,fg-cc-cv-threshold-mv = <4390>;
 	qcom,battery-data = <&mot_batterydata>;
 };
+&spmi_bus {
+	qcom,pmi8950@2 {
+		qcom,power-on@800 {
+			qcom,shipmode;
+		};
+	};
+};
+
 &pm8937_vadc {
 	chan@11 {
 		label = "chg_therm";

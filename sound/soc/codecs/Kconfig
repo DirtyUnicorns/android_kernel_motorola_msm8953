@@ -8,9 +8,6 @@ config SND_SOC_I2C_AND_SPI
 	default y if I2C=y
 	default y if SPI_MASTER=y
 
-config SOUND_CONTROL
-	bool "Sound control for wcd9335"
-
 menu "CODEC drivers"
 
 config SND_SOC_ALL_CODECS
@@ -106,6 +103,7 @@ config SND_SOC_ALL_CODECS
 	select SND_SOC_STA529 if I2C
 	select SND_SOC_STAC9766 if SND_SOC_AC97_BUS
 	select SND_SOC_TAS2552 if I2C
+	select SND_SOC_TAS2560 if I2C
 	select SND_SOC_TAS5086 if I2C
 	select SND_SOC_TLV320AIC23_I2C if I2C
 	select SND_SOC_TLV320AIC23_SPI if SPI_MASTER
@@ -618,6 +616,22 @@ config SND_SOC_TAS2552
 	tristate "Texas Instruments TAS2552 Mono Audio amplifier"
 	depends on I2C
 
+config SND_SOC_TAS2560
+	tristate "Texas Instruments TAS2560 SmartAmp"
+	depends on I2C
+
+config TAS2560_REGMAP
+	bool "Use of RegMap API"
+	depends on SND_SOC_TAS2560
+
+config TAS2560_CODEC
+	bool "Codec Driver support"
+	depends on SND_SOC_TAS2560
+
+config TAS2560_MISC
+	bool "Misc Driver support"
+	depends on SND_SOC_TAS2560
+
 config SND_SOC_TAS5086
 	tristate "Texas Instruments TAS5086 speaker amplifier"
 	depends on I2C
@@ -712,7 +726,7 @@ config AUDIO_EXT_CLK
 
 config SND_SOC_WCD_MBHC
 	tristate
-	default y if (SND_SOC_MSM8909_WCD=y || SND_SOC_MSM8X16_WCD=y || SND_SOC_WCD9335=y) && SND_SOC_MDMCALIFORNIUM!=y
+	default y if (SND_SOC_MSM8909_WCD=y || SND_SOC_MSM8X16_WCD=y || SND_SOC_WCD9335=y) && SND_SOC_MDM9650!=y
 
 config SND_SOC_WL1273
 	tristate

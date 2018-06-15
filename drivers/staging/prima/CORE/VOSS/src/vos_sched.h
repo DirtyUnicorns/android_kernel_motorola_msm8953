@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2017  The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -73,7 +73,15 @@
 #include "i_vos_types.h"
 #include "i_vos_packet.h"
 #include <linux/wait.h>
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 19, 0)) && \
+	defined(WLAN_OPEN_SOURCE)
+#include <linux/device.h>
+#include <linux/pm_wakeup.h>
+#else
 #include <linux/wakelock.h>
+#endif
+
 #include <vos_timer.h>
 
 
@@ -365,6 +373,8 @@ typedef struct _VosContextType
    struct list_head wdthread_timer_work_list;
    struct work_struct wdthread_work;
    spinlock_t wdthread_work_lock;
+   bool snoc_high_freq_voting;
+   spinlock_t freq_voting_lock;
 } VosContextType, *pVosContextType;
 
 

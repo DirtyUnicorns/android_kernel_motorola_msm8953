@@ -1015,20 +1015,20 @@ static void __print_buf(struct seq_file *s, struct mdss_mdp_data *buf,
 {
 	char tmpbuf[20];
 	int i;
-	const char *buf_stat_stmap[] = {
+	const char const *buf_stat_stmap[] = {
 		[MDP_BUF_STATE_UNUSED]  = "UNUSED ",
 		[MDP_BUF_STATE_READY]   = "READY  ",
 		[MDP_BUF_STATE_ACTIVE]  = "ACTIVE ",
 		[MDP_BUF_STATE_CLEANUP] = "CLEANUP",
 	};
-	const char *domain_stmap[] = {
+	const char const *domain_stmap[] = {
 		[MDSS_IOMMU_DOMAIN_UNSECURE]     = "mdp_unsecure",
 		[MDSS_IOMMU_DOMAIN_ROT_UNSECURE] = "rot_unsecure",
 		[MDSS_IOMMU_DOMAIN_SECURE]       = "mdp_secure",
 		[MDSS_IOMMU_DOMAIN_ROT_SECURE]   = "rot_secure",
 		[MDSS_IOMMU_MAX_DOMAIN]          = "undefined",
 	};
-	const char *dma_data_dir_stmap[] = {
+	const char const *dma_data_dir_stmap[] = {
 		[DMA_BIDIRECTIONAL] = "read/write",
 		[DMA_TO_DEVICE]     = "read",
 		[DMA_FROM_DEVICE]   = "read/write",
@@ -1075,7 +1075,7 @@ static void __dump_pipe(struct seq_file *s, struct mdss_mdp_pipe *pipe)
 			pipe->mixer_stage, pipe->alpha,
 			pipe->transp, pipe->blend_op);
 	if (pipe->multirect.max_rects > 1) {
-		const char *fmodes[] = {
+		const char const *fmodes[] = {
 			[MDSS_MDP_PIPE_MULTIRECT_PARALLEL]	= "parallel",
 			[MDSS_MDP_PIPE_MULTIRECT_SERIAL]	= "serial",
 			[MDSS_MDP_PIPE_MULTIRECT_NONE]		= "single",
@@ -1160,7 +1160,7 @@ static void __dump_timings(struct seq_file *s, struct mdss_mdp_ctl *ctl)
 	pinfo = &ctl->panel_data->panel_info;
 	seq_printf(s, "Panel #%d %dx%dp%d\n",
 			pinfo->pdest, pinfo->xres, pinfo->yres,
-			mdss_panel_get_framerate(pinfo));
+			mdss_panel_get_framerate(pinfo, FPS_RESOLUTION_HZ));
 	seq_printf(s, "\tvbp=%d vfp=%d vpw=%d hbp=%d hfp=%d hpw=%d\n",
 			pinfo->lcdc.v_back_porch,
 			pinfo->lcdc.v_front_porch,

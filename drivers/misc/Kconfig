@@ -124,6 +124,15 @@ config PHANTOM
 	  If you choose to build module, its name will be phantom. If unsure,
 	  say N here.
 
+config TPS61280
+        tristate "TI TPS61280 configuration"
+        depends on I2C
+        select REGMAP_I2C
+        help
+          This driver supports TPS61280 voltage regulator chip. This
+	  driver is meant for basic configuration only and does not provide
+	  any pm/regulator/thermal framework registration.
+
 config INTEL_MID_PTI
 	tristate "Parallel Trace Interface for MIPI P1149.7 cJTAG standard"
 	depends on PCI && TTY && (X86_INTEL_MID || COMPILE_TEST)
@@ -376,6 +385,16 @@ config SENSORS_APDS990X
 	   To compile this driver as a module, choose M here: the
 	   module will be called apds990x. If unsure, say N here.
 
+config APDS9930
+	 tristate "Avago APDS9930 combined als and proximity sensors"
+	 depends on I2C
+	 help
+	   Say Y here if you want to build a driver for Avago APDS9930
+	   combined ambient light and proximity sensor chip.
+
+	   To compile this driver as a module, choose M here: the
+	   module will be called apds9930. If unsure, say N here.
+
 config HMC6352
 	tristate "Honeywell HMC6352 compass"
 	depends on I2C
@@ -537,6 +556,14 @@ config HDCP_QSEECOM
 	  Environment (QSEE) via the QSEECOM Driver and also calls the APIs
 	  exposed by the HDMI driver to communicate with the Receiver.
 
+config PROFILER
+	tristate "Qualcomm Technologies, Inc. trustzone Communicator driver"
+	help
+	  Provides a communication interface between userspace and
+	  trustzone using Secure Channel Manager (SCM) interface.
+	  It exposes APIs for userspace to get system profiling
+	  information.
+
 config VEXPRESS_SYSCFG
 	bool "Versatile Express System Configuration driver"
 	depends on VEXPRESS_CONFIG
@@ -691,6 +718,12 @@ config FSUSB42_MUX
 	  This option enables a device driver for the FSUSB42 which is a
 	  2 port High Speed USB/UART Switch.
 
+config DTV_FC8300
+	tristate "FC8300 DTV module support"
+	default n
+	help
+	  Enable/disable FC8300 DTV module support
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
@@ -709,4 +742,5 @@ source "drivers/misc/moto-sensorhub/Kconfig"
 source "drivers/misc/fusb302/Kconfig"
 source "drivers/misc/fusb302_legacy/Kconfig"
 source "drivers/misc/stml0xx/Kconfig"
+source "drivers/misc/cypress/Kconfig"
 endmenu

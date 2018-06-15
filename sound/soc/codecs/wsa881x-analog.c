@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -814,11 +814,10 @@ static void wsa881x_ocp_ctl_work(struct work_struct *work)
 	wsa881x_get_temp(wsa881x->tz_pdata.tz_dev, &temp_val);
 	dev_dbg(codec->dev, " temp = %ld\n", temp_val);
 
-	if (temp_val <= WSA881X_OCP_CTL_TEMP_CELSIUS) {
+	if (temp_val <= WSA881X_OCP_CTL_TEMP_CELSIUS)
 		snd_soc_update_bits(codec, WSA881X_SPKR_OCP_CTL, 0xC0, 0x00);
-	} else {
+	else
 		snd_soc_update_bits(codec, WSA881X_SPKR_OCP_CTL, 0xC0, 0xC0);
-	}
 
 		schedule_delayed_work(&wsa881x->ocp_ctl_work,
 			msecs_to_jiffies(wsa881x_ocp_poll_timer_sec * 1000));
@@ -1259,8 +1258,10 @@ static int wsa881x_i2c_probe(struct i2c_client *client,
 
 	if ((client->addr == WSA881X_I2C_SPK0_SLAVE1_ADDR ||
 		client->addr == WSA881X_I2C_SPK1_SLAVE1_ADDR) &&
-		(pdata->status == WSA881X_STATUS_PROBING))
+		(pdata->status == WSA881X_STATUS_PROBING)) {
+		wsa881x_probing_count++;
 		return ret;
+	}
 
 	if (pdata->status == WSA881X_STATUS_I2C) {
 		dev_dbg(&client->dev, "%s:probe for other slaves\n"
@@ -1289,6 +1290,7 @@ static int wsa881x_i2c_probe(struct i2c_client *client,
 					pdata->regmap[WSA881X_ANALOG_SLAVE],
 					WSA881X_ANALOG_SLAVE);
 
+		wsa881x_probing_count++;
 		return ret;
 	} else if (pdata->status == WSA881X_STATUS_PROBING) {
 		pdata->index = wsa881x_index;
@@ -1314,7 +1316,6 @@ static int wsa881x_i2c_probe(struct i2c_client *client,
 			ret = -EINVAL;
 			goto err;
 		}
-		i2c_set_clientdata(client, pdata);
 		dev_set_drvdata(&client->dev, client);
 
 		pdata->regmap[WSA881X_DIGITAL_SLAVE] =
@@ -1372,7 +1373,7 @@ err:
 
 static int wsa881x_i2c_remove(struct i2c_client *client)
 {
-	struct wsa881x_pdata *wsa881x = i2c_get_clientdata(client);
+	struct wsa881x_pdata *wsa881x = client->dev.platform_data;
 
 	snd_soc_unregister_codec(&client->dev);
 	i2c_set_clientdata(client, NULL);
@@ -1419,6 +1420,7 @@ static struct i2c_driver wsa881x_codec_driver = {
 	.driver = {
 		.name = "wsa881x-i2c-codec",
 		.owner = THIS_MODULE,
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 #ifdef CONFIG_PM_SLEEP
 		.pm = &wsa881x_i2c_pm_ops,
 #endif

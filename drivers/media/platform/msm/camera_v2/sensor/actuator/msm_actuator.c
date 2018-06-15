@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -60,6 +60,11 @@ static int32_t msm_actuator_piezo_set_default_focus(
 	struct msm_camera_i2c_reg_setting reg_setting;
 	CDBG("Enter\n");
 
+	if (a_ctrl->i2c_reg_tbl == NULL) {
+		pr_err("failed. i2c reg tabl is NULL");
+		return -EFAULT;
+	}
+
 	if (a_ctrl->curr_step_pos != 0) {
 		a_ctrl->i2c_tbl_index = 0;
 		a_ctrl->func_tbl->actuator_parse_i2c_params(a_ctrl,
@@ -97,6 +102,11 @@ static void msm_actuator_parse_i2c_params(struct msm_actuator_ctrl_t *a_ctrl,
 
 	if (a_ctrl == NULL) {
 		pr_err("failed. actuator ctrl is NULL");
+		return;
+	}
+
+	if (a_ctrl->i2c_reg_tbl == NULL) {
+		pr_err("failed. i2c reg tabl is NULL");
 		return;
 	}
 
@@ -542,6 +552,11 @@ static int32_t msm_actuator_piezo_move_focus(
 		return -EFAULT;
 	}
 
+	if (a_ctrl->i2c_reg_tbl == NULL) {
+		pr_err("failed. i2c reg tabl is NULL");
+		return -EFAULT;
+	}
+
 	if (dest_step_position > a_ctrl->total_steps) {
 		pr_err("Step pos greater than total steps = %d\n",
 			dest_step_position);
@@ -599,7 +614,11 @@ static int32_t msm_actuator_move_focus(
 		pr_err("Invalid direction = %d\n", dir);
 		return -EFAULT;
 	}
-	if (dest_step_pos >= a_ctrl->total_steps) {
+	if (a_ctrl->i2c_reg_tbl == NULL) {
+		pr_err("failed. i2c reg tabl is NULL");
+		return -EFAULT;
+	}
+	if (dest_step_pos > a_ctrl->total_steps) {
 		pr_err("Step pos greater than total steps = %d\n",
 		dest_step_pos);
 		return -EFAULT;
@@ -633,6 +652,8 @@ static int32_t msm_actuator_move_focus(
 		a_ctrl->curr_step_pos, dest_step_pos, curr_lens_pos);
 
 	while (a_ctrl->curr_step_pos != dest_step_pos) {
+		if (a_ctrl->curr_region_index >= a_ctrl->region_size)
+			break;
 		step_boundary =
 			a_ctrl->region_params[a_ctrl->curr_region_index].
 			step_bound[dir];
@@ -1178,7 +1199,8 @@ static int32_t msm_actuator_set_position(
 	}
 
 	if (!a_ctrl || !a_ctrl->func_tbl ||
-		!a_ctrl->func_tbl->actuator_parse_i2c_params) {
+		!a_ctrl->func_tbl->actuator_parse_i2c_params ||
+		!a_ctrl->i2c_reg_tbl) {
 		pr_err("failed. NULL actuator pointers.");
 		return -EFAULT;
 	}
@@ -1210,6 +1232,69 @@ static int32_t msm_actuator_set_position(
 		}
 		a_ctrl->i2c_tbl_index = 0;
 	}
+	CDBG("%s exit %d\n", __func__, __LINE__);
+	return rc;
+}
+
+static int32_t msm_actuator_get_position(
+	struct msm_actuator_ctrl_t *a_ctrl,
+	struct msm_actuator_get_position_t *get_pos)
+{
+	int32_t rc = 0;
+
+	CDBG("%s Enter %d\n", __func__, __LINE__);
+
+	if (!a_ctrl || !a_ctrl->i2c_client.i2c_func_tbl ||
+			!a_ctrl->i2c_client.i2c_func_tbl->i2c_read) {
+		pr_err("failed. NULL actuator pointers.");
+		return -EFAULT;
+	}
+
+	if (a_ctrl->actuator_state != ACT_OPS_ACTIVE) {
+		pr_err("failed. Invalid actuator state.");
+		return -EFAULT;
+	}
+
+	memset(get_pos, 0, sizeof(*get_pos));
+
+	if (a_ctrl->get_pos_cfg.target_supported) {
+		uint16_t data;
+
+		rc = a_ctrl->i2c_client.i2c_func_tbl->i2c_read(
+				&a_ctrl->i2c_client,
+				a_ctrl->get_pos_cfg.target_reg,
+				&data,
+				a_ctrl->i2c_data_type);
+		if (rc < 0) {
+			pr_err("failed. unable to get target position\n");
+			return -EFAULT;
+		}
+		data >>= a_ctrl->get_pos_cfg.target_data_shift;
+		get_pos->target = (int32_t)data;
+		get_pos->target_supported = 1;
+	}
+
+	if (a_ctrl->get_pos_cfg.actual_supported) {
+		uint16_t data;
+
+		rc = a_ctrl->i2c_client.i2c_func_tbl->i2c_read(
+				&a_ctrl->i2c_client,
+				a_ctrl->get_pos_cfg.actual_reg,
+				&data,
+				a_ctrl->i2c_data_type);
+		if (rc < 0) {
+			pr_err("failed. unable to get actual position\n");
+			return -EFAULT;
+		}
+		data >>= a_ctrl->get_pos_cfg.actual_data_shift;
+		get_pos->actual = (int32_t)data;
+		get_pos->actual_supported = 1;
+	}
+
+	CDBG("get pos: %d %d %d %d\n",
+			get_pos->target_supported, get_pos->target,
+			get_pos->actual_supported, get_pos->actual);
+
 	CDBG("%s exit %d\n", __func__, __LINE__);
 	return rc;
 }
@@ -1288,13 +1373,13 @@ static int32_t msm_actuator_set_param(struct msm_actuator_ctrl_t *a_ctrl,
 
 	a_ctrl->region_size = set_info->af_tuning_params.region_size;
 	a_ctrl->pwd_step = set_info->af_tuning_params.pwd_step;
-	a_ctrl->total_steps = set_info->af_tuning_params.total_steps;
 
 	if (copy_from_user(&a_ctrl->region_params,
 		(void *)set_info->af_tuning_params.region_params,
-		a_ctrl->region_size * sizeof(struct region_params_t)))
+		a_ctrl->region_size * sizeof(struct region_params_t))) {
+		pr_err("Error copying region_params\n");
 		return -EFAULT;
-
+	}
 	if (a_ctrl->act_device_type == MSM_CAMERA_PLATFORM_DEVICE) {
 		cci_client = a_ctrl->i2c_client.cci_client;
 		cci_client->sid =
@@ -1324,6 +1409,7 @@ static int32_t msm_actuator_set_param(struct msm_actuator_ctrl_t *a_ctrl,
 		(a_ctrl->i2c_reg_tbl != NULL)) {
 		kfree(a_ctrl->i2c_reg_tbl);
 	}
+
 	a_ctrl->i2c_reg_tbl = NULL;
 	a_ctrl->i2c_reg_tbl =
 		kmalloc(sizeof(struct msm_camera_i2c_reg_array) *
@@ -1332,6 +1418,8 @@ static int32_t msm_actuator_set_param(struct msm_actuator_ctrl_t *a_ctrl,
 		pr_err("kmalloc fail\n");
 		return -ENOMEM;
 	}
+
+	a_ctrl->total_steps = set_info->af_tuning_params.total_steps;
 
 	if (copy_from_user(&a_ctrl->reg_tbl,
 		(void *)set_info->actuator_params.reg_tbl_params,
@@ -1384,6 +1472,27 @@ static int32_t msm_actuator_set_param(struct msm_actuator_ctrl_t *a_ctrl,
 	if (a_ctrl->func_tbl->actuator_init_step_table)
 		rc = a_ctrl->func_tbl->
 			actuator_init_step_table(a_ctrl, set_info);
+
+	/* Get Position Config */
+	a_ctrl->get_pos_cfg.target_supported =
+		set_info->actuator_params.get_pos_cfg.target_supported;
+	a_ctrl->get_pos_cfg.target_reg =
+		set_info->actuator_params.get_pos_cfg.target_reg;
+	a_ctrl->get_pos_cfg.target_data_shift =
+		set_info->actuator_params.get_pos_cfg.target_data_shift;
+	a_ctrl->get_pos_cfg.actual_supported =
+		set_info->actuator_params.get_pos_cfg.actual_supported;
+	a_ctrl->get_pos_cfg.actual_reg =
+		set_info->actuator_params.get_pos_cfg.actual_reg;
+	a_ctrl->get_pos_cfg.actual_data_shift =
+		set_info->actuator_params.get_pos_cfg.actual_data_shift;
+	CDBG("get pos cfg: %d %d %d %d %d %d\n",
+			a_ctrl->get_pos_cfg.target_supported,
+			a_ctrl->get_pos_cfg.target_reg,
+			a_ctrl->get_pos_cfg.target_data_shift,
+			a_ctrl->get_pos_cfg.actual_supported,
+			a_ctrl->get_pos_cfg.actual_reg,
+			a_ctrl->get_pos_cfg.actual_data_shift);
 
 	a_ctrl->curr_step_pos = 0;
 	a_ctrl->curr_region_index = 0;
@@ -1477,6 +1586,12 @@ static int32_t msm_actuator_config(struct msm_actuator_ctrl_t *a_ctrl,
 				&cdata->cfg.setpos);
 		if (rc < 0)
 			pr_err("actuator_set_position failed %d\n", rc);
+		break;
+
+	case CFG_GET_POSITION:
+		rc = msm_actuator_get_position(a_ctrl, &cdata->cfg.getpos);
+		if (rc < 0)
+			pr_err("msm_actuator_get_position failed %d\n", rc);
 		break;
 
 	case CFG_ACTUATOR_POWERUP:
@@ -1693,6 +1808,9 @@ static long msm_actuator_subdev_do_ioctl(
 				u32->cfg.set_info.mot_af_tuning_params.
 				infinity_dac;
 
+			actuator_data.cfg.set_info.actuator_params.get_pos_cfg =
+				u32->cfg.set_info.actuator_params.get_pos_cfg;
+
 			parg = &actuator_data;
 			break;
 		case CFG_SET_DEFAULT_FOCUS:
@@ -1728,6 +1846,10 @@ static long msm_actuator_subdev_do_ioctl(
 			parg = &actuator_data;
 			break;
 		}
+		break;
+	case VIDIOC_MSM_ACTUATOR_CFG:
+		pr_err("%s: invalid cmd 0x%x received\n", __func__, cmd);
+		return -EINVAL;
 	}
 
 	rc = msm_actuator_subdev_ioctl(sd, cmd, parg);
@@ -1742,6 +1864,9 @@ static long msm_actuator_subdev_do_ioctl(
 		case CFG_MOVE_FOCUS:
 			u32->cfg.move.curr_lens_pos =
 				actuator_data.cfg.move.curr_lens_pos;
+			break;
+		case CFG_GET_POSITION:
+			u32->cfg.getpos = actuator_data.cfg.getpos;
 			break;
 		default:
 			break;
@@ -1960,15 +2085,16 @@ static int32_t msm_actuator_platform_probe(struct platform_device *pdev)
 	}
 	rc = msm_sensor_driver_get_gpio_data(&(msm_actuator_t->gconf),
 		(&pdev->dev)->of_node);
-	if (rc < 0) {
-		pr_err("%s: No/Error Actuator GPIOs\n", __func__);
+	if (-ENODEV == rc) {
+		pr_notice("No valid actuator GPIOs data\n");
+	} else if (rc < 0) {
+		pr_err("Error Actuator GPIOs\n");
 	} else {
 		msm_actuator_t->cam_pinctrl_status = 1;
 		rc = msm_camera_pinctrl_init(
 			&(msm_actuator_t->pinctrl_info), &(pdev->dev));
 		if (rc < 0) {
-			pr_err("ERR:%s: Error in reading actuator pinctrl\n",
-				__func__);
+			pr_err("ERR: Error in reading actuator pinctrl\n");
 			msm_actuator_t->cam_pinctrl_status = 0;
 		}
 	}
@@ -2058,8 +2184,6 @@ static int __init msm_actuator_init_module(void)
 	int32_t rc = 0;
 	CDBG("Enter\n");
 	rc = platform_driver_register(&msm_actuator_platform_driver);
-	if (!rc)
-		return rc;
 
 	CDBG("%s:%d rc %d\n", __func__, __LINE__, rc);
 	return i2c_add_driver(&msm_actuator_i2c_driver);

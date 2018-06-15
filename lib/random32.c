@@ -38,7 +38,6 @@
 #include <linux/random.h>
 #include <linux/sched.h>
 #include <asm/unaligned.h>
-#include <linux/timer.h>
 
 #ifdef CONFIG_RANDOM32_SELFTEST
 static void __init prandom_state_selftest(void);
