@@ -6,8 +6,8 @@ DATE_POSTFIX=$(date +"%Y%m%d")
 
 ## Copy this script inside the kernel directory
 KERNEL_DIR=$PWD
-KERNEL_TOOLCHAIN=/home/nick/data/validus/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin/aarch64-linux-android-
-CLANG_TOOLCHAIN=/home/nick/data/validus/prebuilts/clang/host/linux-x86/7.0-DragonTC/bin/clang
+KERNEL_TOOLCHAIN=/home/nick/data/arrow/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin/aarch64-linux-android-
+CLANG_TOOLCHAIN=/home/nick/data/arrow/prebuilts/clang/host/linux-x86/7.0-DragonTC/bin/clang
 KERNEL_DEFCONFIG=potter_defconfig
 DTBTOOL=$KERNEL_DIR/Dtbtool/
 JOBS=28
