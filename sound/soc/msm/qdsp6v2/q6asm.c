@@ -465,13 +465,12 @@ static void q6asm_session_free(struct audio_client *ac)
 	struct list_head		*ptr, *next;
 	struct asm_no_wait_node		*node;
 	unsigned long			flags;
-	unsigned long			session_flags;
 	int session_id;
 
 	pr_debug("%s: sessionid[%d]\n", __func__, ac->session);
 	session_id = ac->session;
 	rtac_remove_popp_from_adm_devices(ac->session);
-	spin_lock_irqsave(&(session[session_id].session_lock), session_flags);
+	spin_lock_irqsave(&(session[session_id].session_lock), flags);
 	session[ac->session].ac = NULL;
 	ac->session = 0;
 	ac->perf_mode = LEGACY_PCM_MODE;
@@ -479,19 +478,16 @@ static void q6asm_session_free(struct audio_client *ac)
 	ac->cb = NULL;
 	ac->priv = NULL;
 
-	spin_lock_irqsave(&ac->no_wait_que_spinlock, flags);
-	if (ac->no_wait_que.prev && ac->no_wait_que.next) {
-		list_for_each_safe(ptr, next, &ac->no_wait_que) {
-			node = list_entry(ptr, struct asm_no_wait_node, list);
-			list_del(&node->list);
-			kfree(node);
-		}
+	spin_lock(&ac->no_wait_que_spinlock);
+	list_for_each_safe(ptr, next, &ac->no_wait_que) {
+		node = list_entry(ptr, struct asm_no_wait_node, list);
+		list_del(&node->list);
+		kfree(node);
 	}
-	spin_unlock_irqrestore(&ac->no_wait_que_spinlock, flags);
+	spin_unlock(&ac->no_wait_que_spinlock);
 
 	kfree(ac);
-	spin_unlock_irqrestore(&(session[session_id].session_lock),
-			       session_flags);
+	spin_unlock_irqrestore(&(session[session_id].session_lock), flags);
 	return;
 }
 
@@ -1039,12 +1035,14 @@ void q6asm_audio_client_free(struct audio_client *ac)
 	}
 
 	rtac_set_asm_handle(ac->session, NULL);
-	apr_deregister(ac->apr2);
-	apr_deregister(ac->apr);
-	q6asm_mmap_apr_dereg();
-	ac->apr2 = NULL;
-	ac->apr = NULL;
-	ac->mmap_apr = NULL;
+	if (!atomic_read(&ac->reset)) {
+		apr_deregister(ac->apr2);
+		apr_deregister(ac->apr);
+		q6asm_mmap_apr_dereg();
+		ac->apr2 = NULL;
+		ac->apr = NULL;
+		ac->mmap_apr = NULL;
+	}
 	q6asm_session_free(ac);
 
 	pr_debug("%s: APR De-Register\n", __func__);
@@ -1464,7 +1462,6 @@ static int32_t q6asm_srvc_callback(struct apr_client_data *data, void *priv)
 			}
 			pr_debug("%s: Clearing custom topology\n", __func__);
 		}
-		this_mmap.apr = NULL;
 
 		cal_utils_clear_cal_block_q6maps(ASM_MAX_CAL_TYPES, cal_data);
 		common_client.mmap_apr = NULL;
@@ -1656,7 +1653,7 @@ static int32_t q6asm_callback(struct apr_client_data *data, void *priv)
 	uint32_t *payload;
 	uint32_t wakeup_flag = 1;
 	int32_t  ret = 0;
-	unsigned long flags;
+	unsigned long flags = 0;
 	int session_id;
 
 	if (ac == NULL) {
@@ -1697,8 +1694,10 @@ static int32_t q6asm_callback(struct apr_client_data *data, void *priv)
 
 	if (data->opcode == RESET_EVENTS) {
 		atomic_set(&ac->reset, 1);
-		if (ac->apr == NULL)
+		if (ac->apr == NULL) {
 			ac->apr = ac->apr2;
+			ac->apr2 = NULL;
+		}
 		pr_debug("%s: Reset event is received: %d %d apr[%pK]\n",
 			__func__,
 			data->reset_event, data->reset_proc, ac->apr);
@@ -2234,7 +2233,7 @@ int q6asm_is_dsp_buf_avail(int dir, struct audio_client *ac)
 static void __q6asm_add_hdr(struct audio_client *ac, struct apr_hdr *hdr,
 			uint32_t pkt_size, uint32_t cmd_flg, uint32_t stream_id)
 {
-	unsigned long flags;
+	unsigned long flags = 0;
 
 	dev_vdbg(ac->dev, "%s: pkt_size=%d cmd_flg=%d session=%d stream_id=%d\n",
 			__func__, pkt_size, cmd_flg, ac->session, stream_id);

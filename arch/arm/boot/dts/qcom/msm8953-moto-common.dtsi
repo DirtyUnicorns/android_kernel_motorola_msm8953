@@ -32,6 +32,23 @@
 		/delete-property/ i2c5;
 	};
 
+	firmware: firmware {
+		android {
+			compatible = "android,firmware";
+			fstab {
+				compatible = "android,fstab";
+				system {
+					compatible = "android,system";
+					dev = "/dev/block/platform/soc/7824900.sdhci/by-name/system";
+					type = "ext4";
+					mnt_flags = "ro,barrier=1,discard";
+					fsmgr_flags = "wait,verify";
+					status = "ok";
+				};
+			};
+		};
+	};
+
 	reserved-memory {
 		ramoops_mem: ramoops_mem_region {
 			no-map;
@@ -1223,6 +1240,11 @@
 };
 
 &spmi_bus {
+	qcom,pm8953@0 {
+		qcom,power-on@800 {
+			/delete-property/ qcom,store-hard-reset-reason;
+		};
+	};
 	qcom,pmi8950@2 {
 		qcom,power-on@800 {
 			qcom,shipmode;

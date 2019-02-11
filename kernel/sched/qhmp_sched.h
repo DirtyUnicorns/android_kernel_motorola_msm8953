@@ -27,6 +27,10 @@ extern atomic_long_t calc_load_tasks;
 
 extern long calc_load_fold_active(struct rq *this_rq);
 extern void update_cpu_load_active(struct rq *this_rq);
+static inline void sched_account_irqstart(int cpu, struct task_struct *curr,
+					u64 wallclock)
+{
+}
 
 /*
  * Helpers for converting nanosecond timing to jiffy resolution
@@ -1026,6 +1030,9 @@ static inline int sched_cpu_high_irqload(int cpu)
 {
 	return sched_irqload(cpu) >= sysctl_sched_cpu_high_irqload;
 }
+
+static inline bool hmp_capable(void) { return false; }
+static inline bool is_min_capacity_cpu(int cpu) { return true; }
 
 #else	/* CONFIG_SCHED_HMP */
 

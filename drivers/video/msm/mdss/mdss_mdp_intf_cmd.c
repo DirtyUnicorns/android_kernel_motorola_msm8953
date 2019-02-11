@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -727,7 +727,7 @@ int mdss_mdp_resource_control(struct mdss_mdp_ctl *ctl, u32 sw_event)
 				schedule_work(&ctx->gate_clk_work);
 
 			/* start work item to shut down after delay */
-			queue_delayed_work(system_power_efficient_wq,
+			schedule_delayed_work(
 					&ctx->delayed_off_clk_work,
 					CMD_MODE_IDLE_TIMEOUT);
 		}
@@ -891,8 +891,7 @@ int mdss_mdp_resource_control(struct mdss_mdp_ctl *ctl, u32 sw_event)
 			 * reached. This is to prevent the case where early wake
 			 * up is called but no frame update is sent.
 			 */
-			queue_delayed_work(system_power_efficient_wq,
-				&ctx->delayed_off_clk_work,
+			schedule_delayed_work(&ctx->delayed_off_clk_work,
 				      CMD_MODE_IDLE_TIMEOUT);
 			pr_debug("off work scheduled\n");
 		}
@@ -1970,9 +1969,6 @@ static int mdss_mdp_cmd_wait4pingpong(struct mdss_mdp_ctl *ctl, void *arg)
 			mdss_fb_report_panel_dead(ctl->mfd);
 		} else if (ctx->pp_timeout_report_cnt == 0) {
 			MDSS_XLOG(0xbad);
-			MDSS_XLOG_TOUT_HANDLER("mdp", "dsi0_ctrl", "dsi0_phy",
-				"dsi1_ctrl", "dsi1_phy", "vbif", "vbif_nrt",
-				"dbg_bus", "vbif_dbg_bus", "panic");
 			MDSS_XLOG_TOUT_HANDLER_MMI("mdp",
 						"dsi0_ctrl", "dsi0_phy",
 						"dsi1_ctrl", "dsi1_phy");

@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1535,6 +1535,21 @@ static struct snd_soc_dai_link msm8952_common_fe_dai[] = {
 		 /* this dai link has playback support */
 		.be_id = MSM_FRONTEND_DAI_MULTIMEDIA19,
 	},
+	{/* hw:x,40 */
+		.name = "SLIMBUS_2 Hostless",
+		.stream_name = "SLIMBUS_2 Hostless",
+		.cpu_dai_name = "SLIMBUS2_HOSTLESS",
+		.platform_name = "msm-pcm-hostless",
+		.dynamic = 1,
+		.dpcm_capture = 1,
+		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
+			SND_SOC_DPCM_TRIGGER_POST},
+		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
+		.ignore_suspend = 1,
+		.ignore_pmdown_time = 1,
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.codec_name = "snd-soc-dummy",
+	},
 };
 
 static struct snd_soc_dai_link msm8952_tdm_fe_dai[] = {
@@ -2246,9 +2261,9 @@ struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 				memcpy(msm8952_marley_dai_links + len3,
 					msm8952_marley_albus_mods_be_dai,
 					sizeof(msm8952_marley_albus_mods_be_dai));
-				len4 = len3 + ARRAY_SIZE(msm8952_marley_mods_be_dai);
+				len5 = len3 + ARRAY_SIZE(msm8952_marley_mods_be_dai);
 			#else
-				len4 = len3;
+				len5 = len3;
 			#endif
 		} else {
 			memcpy(msm8952_marley_dai_links + len_2a,
@@ -2258,9 +2273,9 @@ struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 				memcpy(msm8952_marley_dai_links + len3,
 					msm8952_marley_mods_be_dai,
 					sizeof(msm8952_marley_mods_be_dai));
-				len4 = len3 + ARRAY_SIZE(msm8952_marley_mods_be_dai);
+				len5 = len3 + ARRAY_SIZE(msm8952_marley_mods_be_dai);
 			#else
-				len4 = len3;
+				len5 = len3;
 			#endif
 		}
 	}
@@ -2284,10 +2299,10 @@ struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 				if (ret == 0)
 					msm8952_ali_hdmi_dba_dai_link[0].cpu_dai_name =
 						dba_cpu_dai_name;
-				memcpy(msm8952_dai_links + len4,
+				memcpy(msm8952_dai_links + len5,
 						msm8952_ali_hdmi_dba_dai_link,
 						sizeof(msm8952_ali_hdmi_dba_dai_link));
-				len4 += ARRAY_SIZE(msm8952_ali_hdmi_dba_dai_link);
+				len5 += ARRAY_SIZE(msm8952_ali_hdmi_dba_dai_link);
 			} else { /* albus */
 				if (ret == 0)
 					msm8952_albus_hdmi_dba_dai_link[0].cpu_dai_name =

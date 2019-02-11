@@ -2,7 +2,7 @@
  * Core MDSS framebuffer driver.
  *
  * Copyright (C) 2007 Google Incorporated
- * Copyright (c) 2008-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2008-2018, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -101,12 +101,6 @@ static ssize_t _name##_store(struct device *dev, \
 	ret = mdss_fb_set_param(dev, _id, buf); \
 	return ret ? ret : count; \
 }
-
-#define MDSS_BRIGHT_TO_BL_DIM(out, v) do {\
-			out = (12*v*v+1393*v+3060)/4465;\
-			} while (0)
-bool backlight_dimmer = false;
-module_param(backlight_dimmer, bool, 0755);
 
 static struct fb_info *fbi_list[MAX_FBI_LIST];
 static int fbi_list_index;
@@ -315,14 +309,10 @@ static void mdss_fb_set_bl_brightness(struct led_classdev *led_cdev,
 	if (value > mfd->panel_info->brightness_max)
 		value = mfd->panel_info->brightness_max;
 
-	if (backlight_dimmer) {
-		MDSS_BRIGHT_TO_BL_DIM(bl_lvl, value);
-	} else {
-		/* This maps android backlight level 0 to 255 into
-		   driver backlight level 0 to bl_max with rounding */
-		MDSS_BRIGHT_TO_BL(bl_lvl, value, mfd->panel_info->bl_max,
-					mfd->panel_info->brightness_max);
-	}
+	/* This maps android backlight level 0 to 255 into
+	   driver backlight level 0 to bl_max with rounding */
+	MDSS_BRIGHT_TO_BL(bl_lvl, value, mfd->panel_info->bl_max,
+				mfd->panel_info->brightness_max);
 
 	if (!bl_lvl && value)
 		bl_lvl = 1;
@@ -373,6 +363,9 @@ static ssize_t mdss_fb_get_type(struct device *dev,
 		break;
 	case EDP_PANEL:
 		ret = snprintf(buf, PAGE_SIZE, "edp panel\n");
+		break;
+	case SPI_PANEL:
+		ret = snprintf(buf, PAGE_SIZE, "spi panel\n");
 		break;
 	default:
 		ret = snprintf(buf, PAGE_SIZE, "unknown panel\n");
@@ -1262,6 +1255,9 @@ static void mdss_fb_shutdown(struct platform_device *pdev)
 {
 	struct msm_fb_data_type *mfd = platform_get_drvdata(pdev);
 
+	if (!mfd)
+		return;
+
 	mfd->shutdown_pending = true;
 
 	/* wake up threads waiting on idle or kickoff queues */
@@ -1519,6 +1515,7 @@ static int mdss_fb_probe(struct platform_device *pdev)
 	struct mdss_panel_data *pdata;
 	struct fb_info *fbi;
 	int rc;
+	const char *data;
 
 	if (fbi_list_index >= MAX_FBI_LIST)
 		return -ENOMEM;
@@ -1567,6 +1564,21 @@ static int mdss_fb_probe(struct platform_device *pdev)
 
 	mfd->pdev = pdev;
 
+	if (mfd->panel.type == SPI_PANEL)
+		mfd->fb_imgType = MDP_RGB_565;
+	if (mfd->panel.type == MIPI_VIDEO_PANEL || mfd->panel.type ==
+		MIPI_CMD_PANEL || mfd->panel.type == SPI_PANEL){
+		rc = of_property_read_string(pdev->dev.of_node,
+			"qcom,mdss-fb-format", &data);
+		if (!rc) {
+			if (!strcmp(data, "rgb888"))
+				mfd->fb_imgType = MDP_RGB_888;
+			else if (!strcmp(data, "rgb565"))
+				mfd->fb_imgType = MDP_RGB_565;
+			else
+				mfd->fb_imgType = MDP_RGBA_8888;
+		}
+	}
 	mfd->split_fb_left = mfd->split_fb_right = 0;
 
 	mdss_fb_set_split_mode(mfd, pdata);
@@ -1678,6 +1690,7 @@ static void mdss_fb_set_mdp_sync_pt_threshold(struct msm_fb_data_type *mfd,
 		mfd->mdp_sync_pt_data.threshold = 1;
 		mfd->mdp_sync_pt_data.retire_threshold = 0;
 		break;
+	case SPI_PANEL:
 	case MIPI_CMD_PANEL:
 		mfd->mdp_sync_pt_data.threshold = 1;
 		mfd->mdp_sync_pt_data.retire_threshold = 1;
@@ -1967,6 +1980,7 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 	u32 temp = bkl_lvl;
 	bool ad_bl_notify_needed = false;
 	bool bl_notify_needed = false;
+	bool twm_en = false;
 
 	if ((((mdss_fb_is_power_off(mfd) && mfd->dcm_state != DCM_ENTER)
 		|| !mfd->allow_bl_update) && !IS_CALIB_MODE_BL(mfd)) ||
@@ -2001,9 +2015,16 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 			if (mfd->bl_level != bkl_lvl)
 				bl_notify_needed = true;
 			pr_debug("backlight sent to panel :%d\n", temp);
-			pdata->set_backlight(pdata, temp);
-			mfd->bl_level = bkl_lvl;
-			mfd->bl_level_scaled = temp;
+			if (mfd->mdp.is_twm_en)
+				twm_en = mfd->mdp.is_twm_en();
+
+			if (twm_en) {
+				pr_info("TWM Enabled skip backlight update\n");
+			} else {
+				pdata->set_backlight(pdata, temp);
+				mfd->bl_level = bkl_lvl;
+				mfd->bl_level_scaled = temp;
+			}
 		}
 		if (ad_bl_notify_needed)
 			mdss_fb_bl_update_notify(mfd,
@@ -2155,7 +2176,7 @@ static int mdss_fb_blank_blank(struct msm_fb_data_type *mfd,
 	ret = mfd->mdp.off_fnc(mfd);
 	if (ret)
 		mfd->panel_power_state = cur_power_state;
-	else if (mdss_panel_is_power_off(req_power_state))
+	else if (!mdss_panel_is_power_on_interactive(req_power_state))
 		mdss_fb_release_fences(mfd);
 	mfd->op_enable = true;
 	complete(&mfd->power_off_comp);
@@ -2235,6 +2256,10 @@ static int mdss_fb_blank_unblank(struct msm_fb_data_type *mfd)
 			 * the backlight would remain 0 (0 is set in blank).
 			 * Hence resetting back to calibration mode value
 			 */
+
+			if(mfd->panel_info->mipi.panel_bl_delay > 0)
+				msleep(mfd->panel_info->mipi.panel_bl_delay);
+
 			if (IS_CALIB_MODE_BL(mfd))
 				mdss_fb_set_backlight(mfd, mfd->calib_mode_bl);
 			else if ((!mfd->panel_info->mipi.post_init_delay) &&
@@ -2283,6 +2308,14 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 	 * supported for command mode panels. For all other panel, treat lp
 	 * mode as full unblank and ulp mode as full blank.
 	 */
+	if ((mfd->panel_info->type == SPI_PANEL) &&
+		((BLANK_FLAG_LP == blank_mode) ||
+		(BLANK_FLAG_ULP == blank_mode))) {
+		pr_debug("lp/ulp mode are not supported for SPI panels\n");
+		if (mdss_fb_is_power_on_interactive(mfd))
+			return 0;
+	}
+
 	if (mfd->panel_info->type != MIPI_CMD_PANEL) {
 		if (BLANK_FLAG_LP == blank_mode) {
 			pr_debug("lp mode only valid for cmd mode panels\n");
@@ -3704,13 +3737,13 @@ int mdss_fb_atomic_commit(struct fb_info *info,
 			__ioctl_transition_dyn_mode_state(mfd,
 				MSMFB_ATOMIC_COMMIT, true, false);
 			if (mfd->panel.type == WRITEBACK_PANEL) {
-				output_layer = commit_v1->output_layer;
-				if (!output_layer) {
+				if (!commit_v1->output_layer) {
 					pr_err("Output layer is null\n");
 					goto end;
 				}
+				output_layer = commit_v1->output_layer;
 				wb_change = !mdss_fb_is_wb_config_same(mfd,
-						commit_v1->output_layer);
+						output_layer);
 				if (wb_change) {
 					old_xres = pinfo->xres;
 					old_yres = pinfo->yres;
@@ -4030,14 +4063,9 @@ static int __mdss_fb_display_thread(void *data)
 				mfd->index);
 
 	while (1) {
-		ret = wait_event_interruptible(mfd->commit_wait_q,
+		wait_event(mfd->commit_wait_q,
 				(atomic_read(&mfd->commits_pending) ||
 				 kthread_should_stop()));
-
-		if (ret) {
-			pr_info("%s: interrupted", __func__);
-			continue;
-		}
 
 		if (kthread_should_stop())
 			break;

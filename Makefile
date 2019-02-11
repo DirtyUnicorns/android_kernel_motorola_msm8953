@@ -391,7 +391,7 @@ endif
 ifneq ($(CLANG_ENABLE_IA),1)
 CLANG_IA_FLAG	= -no-integrated-as
 endif
-CLANG_FLAGS	:= $(CLANG_TARGET) $(CLANG_GCC_TC) $(CLANG_IA_FLAG) -meabi gnu
+CLANG_FLAGS	:= $(CLANG_TARGET) $(CLANG_GCC_TC) $(CLANG_IA_FLAG)
 endif
 
 # Use USERINCLUDE when you must reference the UAPI directories only.
@@ -642,9 +642,6 @@ endif
 
 # Tell gcc to never replace conditional load with a non-conditional one
 KBUILD_CFLAGS	+= $(call cc-option,--param=allow-store-data-races=0)
-
-# Needed to unbreak GCC 7.x and above
-KBUILD_CFLAGS   += $(call cc-option,-fno-store-merging,)
 
 ifdef CONFIG_READABLE_ASM
 # Disable optimizations that make assembler listings hard to read.
@@ -931,7 +928,7 @@ export mod_sign_cmd
 
 
 ifeq ($(KBUILD_EXTMOD),)
-core-y		+= kernel/ mm/ fs/ ipc/ security/ crypto/ block/
+core-y		+= kernel/ mm/ fs/ ipc/ security/ crypto/ block/ certs/
 
 vmlinux-dirs	:= $(patsubst %/,%,$(filter %/, $(init-y) $(init-m) \
 		     $(core-y) $(core-m) $(drivers-y) $(drivers-m) \

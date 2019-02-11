@@ -2705,6 +2705,7 @@ static ssize_t wcnss_ctrl_write(struct file *fp, const char __user
 		       sizeof(penv->wlan_nv_macAddr));
 		pr_debug("%s:MAC Addr: %pM\n", __func__, penv->wlan_nv_macAddr);
 		break;
+
 	case WCNSS_USR_WLAN_NV_NAME:
 		fname_length = (buf[2] < WLAN_NV_NAME_SIZE) ?
 				buf[2]:WLAN_NV_NAME_SIZE-1;
@@ -2719,6 +2720,7 @@ static ssize_t wcnss_ctrl_write(struct file *fp, const char __user
 		pr_err("%s: user nv set to %s, fname length was %d",
 			__func__, penv->wcnss_nv_name, fname_length);
 		break;
+
 	default:
 		pr_err("%s: Invalid command %d\n", __func__, cmd);
 		rc = -EINVAL;
